@@ -207,6 +207,8 @@ struct ContentView: View {
                 commitWorkspace(state)
             case .stash:
                 StashWorkspaceView().id(state.root.path)
+            case .graph:
+                GraphWorkspaceView().id(state.root.path)
             }
         }
         .navigationSplitViewStyle(.balanced)

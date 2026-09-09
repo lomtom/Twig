@@ -20,9 +20,32 @@ final class RepositoryModel: ObservableObject {
     @Published var confirmation: OperationConfirmation?
     @Published var stashRevision = UUID()
     @Published var treeExpansion: (id: UUID, expand: Bool) = (UUID(), true)
+    @Published var graphCommits: [GraphCommit] = [] {
+        didSet { rebuildGraphLayout() }
+    }
+    @Published private(set) var graphLayout = GraphLaneLayout.make(commits: [])
+    @Published var graphShowLongEdges = false {
+        didSet { rebuildGraphLayout() }
+    }
+    private func rebuildGraphLayout() {
+        graphLayout = GraphLaneLayout.make(commits: graphCommits, showLongEdges: graphShowLongEdges)
+    }
+    @Published var graphSort: GraphSort = .time
+    @Published var graphScope: GraphScope = .allBranches
+    @Published var graphQuery = ""
+    @Published private(set) var graphCurrentUserEmail: String?
+    @Published var graphAuthor: String?
+    @Published var selectedGraphCommitID: String?
+    @Published var graphLoading = false
+    @Published var graphHasMore = false
+    @Published var graphIsShallow = false
+    @Published var graphFiles: [GraphChangedFile] = []
+    @Published var graphDetailsLoading = false
     let git = GitService()
     private var diffTask: Task<Void, Never>?
     private var diffGeneration = UUID()
+    private var graphTask: Task<Void, Never>?
+    private var graphRoot: URL?
 
     var focusedChange: ChangedFile? { state?.files.first { $0.path == focusedFile } }
     var canCommit: Bool {
@@ -54,6 +77,7 @@ final class RepositoryModel: ObservableObject {
             self.selectedPaths = []
             self.focusedFile = snapshot.files.first?.path
             self.message = ""
+            self.resetGraph()
             self.recent.removeAll { $0 == root.path }
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
@@ -73,6 +97,7 @@ final class RepositoryModel: ObservableObject {
 
     private func reload() async throws {
         guard let old = state else { return }
+        let shouldRefreshGraph = graphRoot != nil
         let snapshot = try await git.snapshot(old.root)
         let current = Set(snapshot.files.map(\.path))
         selectedPaths.formIntersection(current)
@@ -80,6 +105,8 @@ final class RepositoryModel: ObservableObject {
         stashRevision = UUID()
         if !snapshot.files.contains(where: { $0.path == focusedFile }) { focusedFile = snapshot.files.first?.path }
         loadDiff()
+        resetGraph()
+        if shouldRefreshGraph { refreshGraph() }
     }
 
     func loadDiff() {
@@ -166,7 +193,7 @@ final class RepositoryModel: ObservableObject {
 
     func pull() {
         guard canSync, let state else { return }
-        confirmation = OperationConfirmation(title: "确认拉取？", message: "从“\(state.upstream ?? "上游")”拉取并更新当前分支和工作区，仅允许快进。") { [weak self] in 
+        confirmation = OperationConfirmation(title: "确认拉取？", message: "从“\(state.upstream ?? "上游")”拉取并更新当前分支和工作区，仅允许快进。") { [weak self] in
             guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.upstream == state.upstream, self.state?.headOID == state.headOID else { return }
             self.executePull() }
     }
@@ -182,7 +209,7 @@ final class RepositoryModel: ObservableObject {
 
     func push() {
         guard canSync, let state else { return }
-        confirmation = OperationConfirmation(title: "确认推送？", message: "将分支“\(state.branch)”的提交推送到“\(state.upstream ?? (state.remote ?? "远程") + "/" + state.branch)”。") { [weak self] in 
+        confirmation = OperationConfirmation(title: "确认推送？", message: "将分支“\(state.branch)”的提交推送到“\(state.upstream ?? (state.remote ?? "远程") + "/" + state.branch)”。") { [weak self] in
             guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.upstream == state.upstream, self.state?.remote == state.remote, self.state?.headOID == state.headOID else { return }
             self.executePush() }
     }
@@ -333,6 +360,7 @@ final class RepositoryModel: ObservableObject {
             self.message = ""
             self.selectedPaths = []
             self.focusedFile = snapshot.files.first?.path
+            self.resetGraph()
             self.recent.removeAll { $0 == root.path }
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
@@ -340,6 +368,97 @@ final class RepositoryModel: ObservableObject {
             self.loadDiff()
             self.notice = "仓库已克隆"
         }
+    }
+
+    var filteredGraphCommits: [GraphCommit] {
+        let query = graphQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return graphCommits.filter { commit in
+            (graphAuthor == nil || commit.author == graphAuthor) &&
+            (query.isEmpty || commit.subject.localizedCaseInsensitiveContains(query) ||
+             commit.author.localizedCaseInsensitiveContains(query) ||
+             commit.oid.localizedCaseInsensitiveContains(query) ||
+             commit.references.contains { $0.name.localizedCaseInsensitiveContains(query) })
+        }
+    }
+
+    var selectedGraphCommit: GraphCommit? { graphCommits.first { $0.oid == selectedGraphCommitID } }
+
+    func selectGraphCommit(_ commit: GraphCommit) {
+        selectedGraphCommitID = commit.oid
+        graphFiles = []
+        graphDetailsLoading = true
+        guard let root = state?.root else { graphDetailsLoading = false; return }
+        graphTask = Task {
+            do {
+                let files = try await git.graphCommitFiles(commit.oid, root: root)
+                guard !Task.isCancelled, selectedGraphCommitID == commit.oid, state?.root == root else { return }
+                graphFiles = files
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+            }
+            if selectedGraphCommitID == commit.oid { graphDetailsLoading = false }
+        }
+    }
+
+    func activateGraph() {
+        guard let root = state?.root else { return }
+        if graphRoot != root || graphCommits.isEmpty { refreshGraph() }
+    }
+
+    func refreshGraph() {
+        guard let root = state?.root, !graphLoading else { return }
+        graphTask?.cancel()
+        graphLoading = true
+        graphRoot = root
+        graphTask = Task {
+            do {
+                let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: 300, offset: 0)
+                guard !Task.isCancelled, graphRoot == root else { return }
+                graphCommits = page.commits
+                graphHasMore = page.hasMore
+                graphIsShallow = page.isShallow
+                graphCurrentUserEmail = page.currentUserEmail
+                if let first = page.commits.first { selectGraphCommit(first) }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+            }
+            graphLoading = false
+        }
+    }
+
+    func loadMoreGraph() {
+        guard let root = state?.root, graphRoot == root, graphHasMore, !graphLoading else { return }
+        graphLoading = true
+        let offset = graphCommits.count
+        Task {
+            do {
+                let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: 300, offset: offset)
+                guard !Task.isCancelled, graphRoot == root else { return }
+                graphCommits.append(contentsOf: page.commits)
+                graphHasMore = page.hasMore
+                graphIsShallow = page.isShallow
+                graphCurrentUserEmail = page.currentUserEmail
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+            }
+            graphLoading = false
+        }
+    }
+
+    private func resetGraph() {
+        graphTask?.cancel()
+        graphRoot = nil
+        graphCurrentUserEmail = nil
+        graphAuthor = nil
+        graphCommits = []
+        graphHasMore = false
+        graphIsShallow = false
+        selectedGraphCommitID = nil
+        graphFiles = []
+        graphDetailsLoading = false
     }
 
     private func perform(_ label: String, recover: Bool = false, operation: @escaping @MainActor () async throws -> Void) {

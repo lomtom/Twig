@@ -3,11 +3,13 @@ import SwiftUI
 enum WorkspaceDestination: String, CaseIterable, Identifiable {
     case commit = "Commit"
     case stash = "Stash"
+    case graph = "Graph"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .commit: return "checkmark.circle"
         case .stash: return "archivebox"
+        case .graph: return "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -62,10 +64,10 @@ struct WorkspaceSidebar: View {
                             icon: destination.icon,
                             showsChevron: false,
                             isSelected: selection == destination,
-                            shortcut: showShortcutHints ? (destination == .commit ? "⌘1" : "⌘2") : nil
+                            shortcut: showShortcutHints ? shortcut(for: destination) : nil
                         )
                     }
-                    .keyboardShortcut(destination == .commit ? "1" : "2", modifiers: .command)
+                    .keyboardShortcut(key(for: destination), modifiers: .command)
                     .accessibilityAddTraits(selection == destination ? .isSelected : [])
                 }
             }
@@ -84,6 +86,22 @@ struct WorkspaceSidebar: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
+    }
+
+    private func key(for destination: WorkspaceDestination) -> KeyEquivalent {
+        switch destination {
+        case .commit: return "1"
+        case .stash: return "2"
+        case .graph: return "3"
+        }
+    }
+
+    private func shortcut(for destination: WorkspaceDestination) -> String {
+        switch destination {
+        case .commit: return "⌘1"
+        case .stash: return "⌘2"
+        case .graph: return "⌘3"
+        }
     }
 }
 

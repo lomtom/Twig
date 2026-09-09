@@ -41,5 +41,6 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 swift scripts/make-icon.swift "$PROJECT_DIR/scripts/AppIcon.png" "$PROJECT_DIR/.build/Twig.iconset" "$APP_DIR/Contents/Resources/AppIcon.icns"
+cp -R "$PROJECT_DIR/ThirdPartyNotices" "$APP_DIR/Contents/Resources/"
 codesign --force --sign - "$APP_DIR"
 printf '\nBuilt: %s\n' "$APP_DIR"

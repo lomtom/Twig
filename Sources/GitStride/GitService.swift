@@ -235,6 +235,69 @@ actor GitService {
         return messages
     }
 
+    func graphLog(root: URL, scope: GraphScope, sort: GraphSort, limit: Int, offset: Int) throws -> GraphPage {
+        if scope == .currentBranch,
+           try run(["rev-parse", "--verify", "--quiet", "HEAD"], at: root, allowFailure: true).code != 0 {
+            return GraphPage(commits: [], hasMore: false, isShallow: false)
+        }
+        let count = limit + 1
+        var arguments = ["log", sort.argument, "--decorate=short", "--no-color", "--max-count=\(count)", "--skip=\(offset)", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%D%x00%s%x00%B%x1e"]
+        if scope == .allBranches { arguments.append("--all") } else { arguments.append("HEAD") }
+        let result = try run(arguments, at: root, allowFailure: true)
+        if result.code != 0 {
+            let detail = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw GitFailure(message: detail.isEmpty ? "无法读取提交历史。" : detail)
+        }
+        let records = result.output.split(separator: 0x1e, omittingEmptySubsequences: true)
+        let commits = records.compactMap { record -> GraphCommit? in
+            let fields = record.split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+            guard fields.count >= 8 else { return nil }
+            // `git log` inserts a newline between formatted records. It must
+            // never become part of the OID used to connect children to parents.
+            let oid = fields[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !oid.isEmpty else { return nil }
+            return GraphCommit(
+                oid: oid, parents: fields[1].split(separator: " ").map(String.init),
+                author: fields[2], email: fields[3], date: Date(timeIntervalSince1970: Double(fields[4]) ?? 0),
+                subject: fields[6], body: fields[7].trimmingCharacters(in: .newlines), references: parseGraphReferences(fields[5])
+            )
+        }
+        let shallow = try run(["rev-parse", "--is-shallow-repository"], at: root, allowFailure: true)
+            .text.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+        let email = try run(["config", "--get", "user.email"], at: root, allowFailure: true)
+            .text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return GraphPage(commits: Array(commits.prefix(limit)), hasMore: commits.count > limit,
+                         isShallow: shallow, currentUserEmail: email.isEmpty ? nil : email)
+    }
+
+    private func parseGraphReferences(_ decorations: String) -> [GraphReference] {
+        decorations.split(separator: ",").compactMap { raw in
+            let value = raw.trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("HEAD -> ") { return GraphReference(name: String(value.dropFirst(8)), kind: .head) }
+            if value.hasPrefix("tag: ") { return GraphReference(name: String(value.dropFirst(5)), kind: .tag) }
+            if value.contains("/") { return GraphReference(name: value, kind: .remote) }
+            return value.isEmpty ? nil : GraphReference(name: value, kind: .local)
+        }
+    }
+
+    func graphCommitFiles(_ oid: String, root: URL) throws -> [GraphChangedFile] {
+        let data = try run(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "--find-renames", oid], at: root).output
+        let fields = data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
+        var files: [GraphChangedFile] = []
+        var index = 0
+        while index + 1 < fields.count {
+            let status = fields[index]
+            let isRename = status.hasPrefix("R") || status.hasPrefix("C")
+            let firstPath = fields[index + 1]
+            index += 2
+            let previousPath = isRename ? firstPath : nil
+            let path: String
+            if isRename, index < fields.count { path = fields[index]; index += 1 } else { path = firstPath }
+            files.append(GraphChangedFile(status: status, path: path, previousPath: previousPath))
+        }
+        return files
+    }
+
     func addToGit(_ file: ChangedFile, root: URL) throws {
         try addToGit([file], root: root)
     }

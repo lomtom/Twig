@@ -17,7 +17,7 @@ open dist/Twig.app
 
 ## 功能
 
-- 左侧工作区导航包含 Commit 与 Stash。Commit 提供文件改动、源文件预览和提交操作；Stash 左侧从上到下显示暂存记录、所选记录的目录树文件和操作按钮，右侧显示文件差异。新建暂存仍从 Commit 的暂存按钮进入。
+- 左侧工作区导航包含 Commit、Stash 与 Graph。Commit 提供文件改动、源文件预览和提交操作；Stash 左侧从上到下显示暂存记录、所选记录的目录树文件和操作按钮，右侧显示文件差异。Graph 以提交拓扑展示当前分支或所有分支，支持按提交说明、作者、SHA 与分支引用搜索定位（保留完整拓扑、淡化不匹配的提交），并显示所选提交的完整说明、引用及变更文件。新建暂存仍从 Commit 的暂存按钮进入。
 
 - 打开本地仓库、克隆 HTTPS / SSH 仓库、最近打开的 8 个仓库。
 - 文件区分为“改动的文件”和“非版本控制文件”，各自按紧凑目录树显示，支持逐文件勾选及目录选择。
@@ -43,6 +43,7 @@ open dist/Twig.app
 - 工作区比较以 HEAD 为基准，没有文本改动时仍显示源文件。超过 2 MB 的源文件不预览，超过 20,000 行时明确提示截断；二进制与非 UTF-8 文件不提供文本预览。
 - 外部编辑完成后回到应用会刷新本地状态，也可按 ⌘R 手动刷新。
 - Git Stash 仅保存所选文件，包含所选未跟踪文件。可在 Stash 菜单恢复，包括索引状态；存在普通未提交改动时仍允许恢复，由 Git 判断能否安全合并。当前已有冲突或进行中的 Git 操作时禁止恢复。恢复失败或发生冲突时记录保留，工作区可能已恢复部分文件，需手动处理。首次提交之前不可新建 Stash。
+- Graph 默认为所有分支最近 300 次提交，可继续加载更早历史；参考 rebased / IntelliJ 的深度遍历布局索引与逐行边排序，轨道随分支结束紧凑收拢。图、提交详情和变更文件采用卡片布局，提交详情和目录树文件列表位于页面右侧。图的单行列表展示说明、右侧分支标签、作者和日期时间，不显示 SHA 列；当天和前一天分别使用 Today 和 Yesterday。列表不显示表头，多引用使用重叠标签图标；工具栏从左到右提供搜索、分支范围和提交人筛选，提交数量靠右显示，排序菜单支持拓扑排序和时间排序（按作者时间优先，保持子提交在父提交之前）。长分支名保留末尾，本人提交按仓库 Git 邮箱识别并强调作者，合并行淡化；不展示底部说明和横向滚动条。默认将跨越 30 行及以上的长边收起为两端箭头，工具栏可展开完整连线；未知父提交以向下箭头标示，图列随卡片宽度适配，列表仅纵向滚动并从顶部开始显示；提交图为只读浏览，不提供改写历史、强推或挑选提交操作。浅克隆仓库会明确提示历史可能不完整。
 - 不支持高级 Git 操作、远程管理、子模块内部管理、PR / Issue 或账号平台集成。
 
 ## 快捷键
@@ -53,6 +54,7 @@ open dist/Twig.app
 | 克隆仓库 | ⇧⌘O |
 | 刷新本地状态 | ⌘R |
 | 获取远程状态 | ⇧⌘R |
+| 打开 Graph | ⌘3 |
 | 提交所选文件 | ⌘Return |
 
 ## 目录
@@ -67,6 +69,9 @@ open dist/Twig.app
 - `Sources/GitStride/SourceCodeScrollView.swift`：AppKit 代码滚动视图与固定行号栏。
 - `Sources/GitStride/StashModels.swift`：Stash 记录与文件模型。
 - `Sources/GitStride/StashWorkspaceView.swift`：Stash 列表、文件预览和操作入口。
+- `Sources/GitStride/GraphModels.swift`：提交图数据、引用与逐行绘制模型。
+- `Sources/GitStride/GraphLayout.swift`：基于 rebased / IntelliJ 思路的布局索引、边排序与跨行几何；来源及许可证见 `ThirdPartyNotices/rebased.md`。
+- `Sources/GitStride/GraphWorkspaceView.swift`：提交图、筛选与提交详情界面。
 - `Sources/GitStride/FileActionSheet.swift`：回滚清单确认、暂存说明与操作确认模型。
 - `Sources/GitStride/GitStrideApp.swift`：应用入口与菜单。
 - `scripts/build-app.sh`：Release 构建、图标生成和 `.app` 打包。
