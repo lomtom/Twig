@@ -143,11 +143,20 @@ actor GitService {
             guard fields.count == 3, fields[1].isEmpty else { continue }
             let ref = fields[0]
             if ref.hasPrefix("refs/heads/") {
-                localBranches.append(GitBranch(ref: ref, name: String(ref.dropFirst(11)), remote: nil, upstream: fields[2]))
+                var ahead = 0, behind = 0
+                if !fields[2].isEmpty {
+                    let counts = try run(["rev-list", "--left-right", "--count", ref + "..." + fields[2]], at: root, allowFailure: true)
+                        .text.split(whereSeparator: { $0.isWhitespace })
+                    if counts.count == 2 {
+                        ahead = Int(counts[0]) ?? 0
+                        behind = Int(counts[1]) ?? 0
+                    }
+                }
+                localBranches.append(GitBranch(ref: ref, name: String(ref.dropFirst(11)), remote: nil, upstream: fields[2], ahead: ahead, behind: behind))
             } else if ref.hasPrefix("refs/remotes/") {
                 let name = String(ref.dropFirst(13))
                 let remoteName = remotes.sorted { $0.count > $1.count }.first { name.hasPrefix($0 + "/") }
-                remoteBranches.append(GitBranch(ref: ref, name: name, remote: remoteName, upstream: ""))
+                remoteBranches.append(GitBranch(ref: ref, name: name, remote: remoteName, upstream: "", ahead: 0, behind: 0))
             }
         }
         var operation: String?
@@ -227,12 +236,18 @@ actor GitService {
     }
 
     func addToGit(_ file: ChangedFile, root: URL) throws {
+        try addToGit([file], root: root)
+    }
+
+    func addToGit(_ files: [ChangedFile], root: URL) throws {
+        let paths = Array(Set(files.map(\.path))).sorted()
+        guard !paths.isEmpty else { return }
         let current = try snapshot(root)
         guard current.operation == nil,
-              current.files.contains(where: { $0.path == file.path && $0.isUntracked }) else {
+              paths.allSatisfy({ path in current.files.contains(where: { $0.path == path && $0.isUntracked }) }) else {
             throw GitFailure(message: "文件状态已变化，请刷新后重试。")
         }
-        try run(["add", "--", file.path], at: root)
+        try run(["add", "--"] + paths, at: root)
     }
 
     func commit(paths: [String], message: String, root: URL) throws {
@@ -268,6 +283,25 @@ actor GitService {
         guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }
         try run(["check-ref-format", "--branch", name], at: root)
         try run(create ? ["switch", "-c", name] : ["switch", "--", name], at: root)
+    }
+    func createBranch(_ name: String, from startPoint: String, root: URL) throws {
+        guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }
+        try run(["check-ref-format", "--branch", name], at: root)
+        try run(["switch", "-c", name, startPoint], at: root)
+    }
+    func renameBranch(_ branch: String, to name: String, root: URL) throws {
+        guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }
+        try run(["check-ref-format", "--branch", name], at: root)
+        try run(["branch", "-m", branch, name], at: root)
+    }
+    func deleteBranch(_ branch: String, root: URL) throws {
+        try run(["branch", "-d", "--", branch], at: root)
+    }
+    func rebaseCurrentBranch(onto branch: String, root: URL) throws {
+        try run(["rebase", "--", branch], at: root)
+    }
+    func mergeIntoCurrentBranch(_ branch: String, root: URL) throws {
+        try run(["merge", "--no-edit", "--", branch], at: root)
     }
     func switchRemoteBranch(_ branch: GitBranch, root: URL) throws -> String {
         let current = try snapshot(root)

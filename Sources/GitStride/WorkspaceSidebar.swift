@@ -15,6 +15,7 @@ enum WorkspaceDestination: String, CaseIterable, Identifiable {
 struct WorkspaceSidebar: View {
     @EnvironmentObject private var model: RepositoryModel
     @Binding var selection: WorkspaceDestination?
+    var showShortcutHints = false
     @State private var showRepositorySwitcher = false
     @State private var showBranchSwitcher = false
 
@@ -60,9 +61,11 @@ struct WorkspaceSidebar: View {
                             title: destination.rawValue,
                             icon: destination.icon,
                             showsChevron: false,
-                            isSelected: selection == destination
+                            isSelected: selection == destination,
+                            shortcut: showShortcutHints ? (destination == .commit ? "⌘1" : "⌘2") : nil
                         )
                     }
+                    .keyboardShortcut(destination == .commit ? "1" : "2", modifiers: .command)
                     .accessibilityAddTraits(selection == destination ? .isSelected : [])
                 }
             }
@@ -90,6 +93,7 @@ private struct SidebarMenuLabel: View {
     var showsChevron = true
     var isSelected = false
     var isExpanded = false
+    var shortcut: String?
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
@@ -107,6 +111,7 @@ private struct SidebarMenuLabel: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if let shortcut { KeyboardShortcutHint(keys: shortcut) }
             if showsChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
@@ -226,6 +231,7 @@ private struct BranchSwitcher: View {
     @EnvironmentObject private var model: RepositoryModel
     @Binding var isPresented: Bool
     @State private var expandedGroups = Set<String>()
+    @State private var branchEditor: BranchEditor?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -254,6 +260,18 @@ private struct BranchSwitcher: View {
         .buttonStyle(SwitcherButtonStyle())
         .padding(8)
         .frame(width: 380)
+        .sheet(item: $branchEditor) { editor in
+            switch editor {
+            case let .rename(branch):
+                BranchNameSheet(title: "重命名分支", placeholder: "分支名称", initialName: branch.name, confirmTitle: "重命名") { name in
+                    model.renameBranch(branch, to: name)
+                }
+            case let .create(branch):
+                BranchNameSheet(title: "新建分支", placeholder: "分支名称", confirmTitle: "创建并切换") { name in
+                    model.createBranch(from: branch, named: name)
+                }
+            }
+        }
     }
 
     private func branchSection(_ title: String, branches: [GitBranch], current: String, id: String) -> some View {
@@ -269,10 +287,29 @@ private struct BranchSwitcher: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
             }
-            BranchSwitcherRows(nodes: BranchTreeNode.build(branches), current: current, groupIDPrefix: id, expandedGroups: $expandedGroups) { branch in
-                isPresented = false
-                if branch.isRemote || branch.name != current { model.selectBranch(branch) }
-            }
+            let currentUpstream = model.state?.localBranches.first(where: { $0.name == current })?.upstream
+            BranchSwitcherRows(nodes: BranchTreeNode.build(branches), current: current, currentUpstream: currentUpstream, groupIDPrefix: id, expandedGroups: $expandedGroups, action: handleBranchAction)
+        }
+    }
+
+    private func handleBranchAction(_ branch: GitBranch, _ action: BranchMenuAction) {
+        switch action {
+        case .checkout:
+            isPresented = false
+            model.selectBranch(branch)
+        case .delete:
+            isPresented = false
+            model.deleteBranch(branch)
+        case .rename:
+            branchEditor = .rename(branch)
+        case .newBranch:
+            branchEditor = .create(branch)
+        case .rebaseOnto:
+            isPresented = false
+            model.rebaseCurrentBranch(onto: branch)
+        case .mergeInto:
+            isPresented = false
+            model.mergeBranchIntoCurrent(branch)
         }
     }
 }
@@ -280,18 +317,20 @@ private struct BranchSwitcher: View {
 private struct BranchSwitcherRows: View {
     let nodes: [BranchTreeNode]
     let current: String
+    let currentUpstream: String?
     let depth: Int
     let groupIDPrefix: String
     @Binding var expandedGroups: Set<String>
-    let select: (GitBranch) -> Void
+    let action: (GitBranch, BranchMenuAction) -> Void
 
-    init(nodes: [BranchTreeNode], current: String, depth: Int = 0, groupIDPrefix: String, expandedGroups: Binding<Set<String>>, select: @escaping (GitBranch) -> Void) {
+    init(nodes: [BranchTreeNode], current: String, currentUpstream: String?, depth: Int = 0, groupIDPrefix: String, expandedGroups: Binding<Set<String>>, action: @escaping (GitBranch, BranchMenuAction) -> Void) {
         self.nodes = nodes
         self.current = current
+        self.currentUpstream = currentUpstream
         self.depth = depth
         self.groupIDPrefix = groupIDPrefix
         _expandedGroups = expandedGroups
-        self.select = select
+        self.action = action
     }
 
     var body: some View {
@@ -307,7 +346,7 @@ private struct BranchSwitcherRows: View {
                             Image(systemName: expandedGroups.contains(groupID) ? "chevron.down" : "chevron.right")
                                 .font(.system(size: 9, weight: .semibold))
                                 .frame(width: 12, height: 18)
-                            Image(systemName: "folder")
+                            Image(systemName: "folder").frame(width: 12)
                             Text(node.name).lineLimit(1).truncationMode(.middle)
                             Spacer(minLength: 0)
                         }
@@ -320,7 +359,7 @@ private struct BranchSwitcherRows: View {
                     .help(node.path)
                     if expandedGroups.contains(groupID) {
                         if let branch = node.branch { branchButton(branch, title: node.name) }
-                        BranchSwitcherRows(nodes: node.children, current: current, depth: depth + 1, groupIDPrefix: groupIDPrefix, expandedGroups: $expandedGroups, select: select)
+                        BranchSwitcherRows(nodes: node.children, current: current, currentUpstream: currentUpstream, depth: depth + 1, groupIDPrefix: groupIDPrefix, expandedGroups: $expandedGroups, action: action)
                     }
                 }
             } else if let branch = node.branch {
@@ -330,17 +369,103 @@ private struct BranchSwitcherRows: View {
     }
 
     private func branchButton(_ branch: GitBranch, title: String) -> some View {
-        Button { select(branch) } label: {
-            Label(title, systemImage: !branch.isRemote && branch.name == current ? "checkmark" : "arrow.triangle.branch")
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, CGFloat(depth) * 14 + 8)
-                .padding(.trailing, 8)
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
+        Menu {
+            Button("Checkout \(branch.name)") { action(branch, .checkout) }
+                .disabled((!branch.isRemote && branch.name == current) || (branch.isRemote && branch.ref == currentUpstream))
+            if !branch.isRemote {
+                Divider()
+                Button("Delete", role: .destructive) { action(branch, .delete) }
+                    .disabled(branch.name == current)
+                Button("Rename…") { action(branch, .rename) }
+                Button("New Branch…") { action(branch, .newBranch) }
+                Divider()
+                Button("Rebase \(current) onto \(branch.name)") { action(branch, .rebaseOnto) }
+                    .disabled(branch.name == current)
+                Button("Merge \(branch.name) into \(current)") { action(branch, .mergeInto) }
+                    .disabled(branch.name == current)
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Color.clear.frame(width: 12, height: 18)
+                Image(systemName: !branch.isRemote && branch.name == current ? "checkmark" : "arrow.triangle.branch")
+                    .frame(width: 12)
+                Text(title).lineLimit(1).truncationMode(.middle)
+                if let difference = branch.upstreamDifference {
+                    Text(difference)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if let upstreamName = branch.upstreamName {
+                    Text(upstreamName)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, CGFloat(depth) * 14 + 8)
+            .padding(.trailing, 8)
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
         }
         .help(branch.name)
+    }
+}
+
+private enum BranchMenuAction {
+    case checkout, delete, rename, newBranch, rebaseOnto, mergeInto
+}
+
+private enum BranchEditor: Identifiable {
+    case rename(GitBranch)
+    case create(GitBranch)
+
+    var id: String {
+        switch self {
+        case let .rename(branch): return "rename:" + branch.id
+        case let .create(branch): return "create:" + branch.id
+        }
+    }
+}
+
+private struct BranchNameSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let placeholder: String
+    let confirmTitle: String
+    let submit: (String) -> Void
+    @State private var name: String
+
+    init(title: String, placeholder: String, initialName: String = "", confirmTitle: String, submit: @escaping (String) -> Void) {
+        self.title = title
+        self.placeholder = placeholder
+        self.confirmTitle = confirmTitle
+        self.submit = submit
+        _name = State(initialValue: initialName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(title).font(.title3.weight(.semibold))
+            TextField(placeholder, text: $name).textFieldStyle(.roundedBorder).onSubmit(confirm)
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(confirmTitle, action: confirm).buttonStyle(.borderedProminent)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 360)
+    }
+
+    private func confirm() {
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        submit(value)
+        dismiss()
     }
 }
 

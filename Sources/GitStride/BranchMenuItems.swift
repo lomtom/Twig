@@ -6,8 +6,20 @@ struct GitBranch: Identifiable {
     let name: String
     let remote: String?
     let upstream: String
+    let ahead: Int
+    let behind: Int
     var id: String { ref }
     var isRemote: Bool { ref.hasPrefix("refs/remotes/") }
+    var upstreamDifference: String? {
+        guard !isRemote, !upstream.isEmpty, ahead > 0 || behind > 0 else { return nil }
+        return [ahead > 0 ? "↑\(ahead)" : nil, behind > 0 ? "↓\(behind)" : nil]
+            .compactMap { $0 }
+            .joined(separator: " ")
+    }
+    var upstreamName: String? {
+        guard !isRemote, upstream.hasPrefix("refs/remotes/") else { return nil }
+        return String(upstream.dropFirst("refs/remotes/".count))
+    }
 }
 
 struct BranchTreeNode: Identifiable {

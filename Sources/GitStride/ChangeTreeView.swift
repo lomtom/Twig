@@ -40,15 +40,18 @@ struct ChangeTreeView: View {
 
     private func directoryRow(_ node: ChangeTreeNode, depth: Int) -> some View {
         let paths = Set(node.files.map(\.path))
+        let files = node.files
+        let isUntrackedDirectory = files.allSatisfy(\.isUntracked)
+        let discardableFiles = files.filter { !$0.isUntracked && $0.index != "A" && !$0.isConflict }
         let selected = paths.intersection(model.selectedPaths).count
         let isCollapsed = collapsed.contains(node.path)
         return HStack(spacing: 7) {
-            Button {
-                if isCollapsed { collapsed.remove(node.path) } else { collapsed.insert(node.path) }
-            } label: {
+            Button { toggleDirectory(node.path) } label: {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold)).frame(width: 12, height: 18)
-            }.buttonStyle(.plain).accessibilityLabel("\(isCollapsed ? "展开" : "折叠") \(node.name)")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(isCollapsed ? "展开" : "折叠") \(node.name)")
             Toggle("选择目录 \(node.path)", sources: node.files.map { file in
                 Binding<Bool>(get: { model.selectedPaths.contains(file.path) }, set: { isSelected in
                     if isSelected { model.selectedPaths.insert(file.path) }
@@ -63,8 +66,20 @@ struct ChangeTreeView: View {
             CountBadge(value: paths.count)
         }.padding(.leading, CGFloat(depth) * 14 + 5).padding(.trailing, 9).padding(.vertical, 1)
             .contentShape(Rectangle())
-            .onTapGesture { if isCollapsed { collapsed.remove(node.path) } else { collapsed.insert(node.path) } }
+            .onTapGesture(count: 2) { toggleDirectory(node.path) }
             .help(node.path)
+            .contextMenu {
+                if isUntrackedDirectory {
+                    Button("添加到 Git") { model.addToGit(files) }
+                        .disabled(model.busy || state.operation != nil)
+                    Divider()
+                }
+                Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(node.path)]) }
+                if !discardableFiles.isEmpty && state.hasHEAD && state.operation == nil {
+                    Button("丢弃目录改动…", role: .destructive) { model.requestFileAction(.rollback, files: discardableFiles) }
+                        .disabled(model.busy)
+                }
+            }
     }
 
     private func fileRow(_ file: ChangedFile, depth: Int) -> some View {
@@ -108,5 +123,10 @@ struct ChangeTreeView: View {
         case "修改": return GitStrideStyle.modified
         default: return .secondary
         }
+    }
+
+    private func toggleDirectory(_ path: String) {
+        if collapsed.contains(path) { collapsed.remove(path) }
+        else { collapsed.insert(path) }
     }
 }

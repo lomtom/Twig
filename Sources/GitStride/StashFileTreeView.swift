@@ -78,17 +78,19 @@ struct StashFileTreeView: View {
     private func directoryRow(_ node: StashTreeNode, depth: Int) -> some View {
         let isCollapsed = collapsed.contains(node.path)
         return HStack(spacing: 7) {
-            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                .font(.system(size: 9, weight: .semibold)).frame(width: 12, height: 18)
+            Button { toggleDirectory(node.path) } label: {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold)).frame(width: 12, height: 18)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(isCollapsed ? "展开" : "折叠") \(node.name)")
             Image(systemName: isCollapsed ? "folder.fill" : "folder")
                 .foregroundStyle(Color.accentColor)
             Text(node.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
             Spacer(minLength: 2)
         }.padding(.leading, CGFloat(depth) * 14 + 5).padding(.trailing, 9).padding(.vertical, 2)
             .contentShape(Rectangle())
-            .onTapGesture {
-                if isCollapsed { collapsed.remove(node.path) } else { collapsed.insert(node.path) }
-            }
+            .onTapGesture(count: 2) { toggleDirectory(node.path) }
             .help(node.path)
     }
 
@@ -121,5 +123,10 @@ struct StashFileTreeView: View {
         case "修改": return GitStrideStyle.modified
         default: return .secondary
         }
+    }
+
+    private func toggleDirectory(_ path: String) {
+        if collapsed.contains(path) { collapsed.remove(path) }
+        else { collapsed.insert(path) }
     }
 }

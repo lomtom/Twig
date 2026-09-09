@@ -107,11 +107,15 @@ final class RepositoryModel: ObservableObject {
     }
 
     func addToGit(_ file: ChangedFile) {
-        guard !busy, file.isUntracked, let state, state.operation == nil else { return }
+        addToGit([file])
+    }
+
+    func addToGit(_ files: [ChangedFile]) {
+        guard !busy, !files.isEmpty, files.allSatisfy(\.isUntracked), let state, state.operation == nil else { return }
         perform("正在添加到 Git…", recover: true) {
-            try await self.git.addToGit(file, root: state.root)
+            try await self.git.addToGit(files, root: state.root)
             try await self.reload()
-            self.notice = "已添加到 Git"
+            self.notice = files.count == 1 ? "已添加到 Git" : "已将 \(files.count) 个文件添加到 Git"
         }
     }
 
@@ -217,6 +221,60 @@ final class RepositoryModel: ObservableObject {
             let name = try await self.git.switchRemoteBranch(branch, root: state.root)
             try await self.reload()
             self.notice = "当前分支：\(name)"
+        }
+    }
+
+    func createBranch(from branch: GitBranch, named name: String) {
+        guard !busy, !branch.isRemote, let state, state.operation == nil else { return }
+        perform("正在创建分支…", recover: true) {
+            try await self.git.createBranch(name, from: branch.name, root: state.root)
+            try await self.reload()
+            self.notice = "当前分支：\(name)"
+        }
+    }
+
+    func renameBranch(_ branch: GitBranch, to name: String) {
+        guard !busy, !branch.isRemote, let state, state.operation == nil else { return }
+        perform("正在重命名分支…", recover: true) {
+            try await self.git.renameBranch(branch.name, to: name, root: state.root)
+            try await self.reload()
+            self.notice = "分支已重命名为：\(name)"
+        }
+    }
+
+    func deleteBranch(_ branch: GitBranch) {
+        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
+        confirmation = OperationConfirmation(title: "删除分支？", message: "将删除本地分支“\(branch.name)”。Git 会阻止删除尚未合并的分支。", destructive: true) { [weak self] in
+            guard let self else { return }
+            self.perform("正在删除分支…", recover: true) {
+                try await self.git.deleteBranch(branch.name, root: state.root)
+                try await self.reload()
+                self.notice = "已删除分支：\(branch.name)"
+            }
+        }
+    }
+
+    func rebaseCurrentBranch(onto branch: GitBranch) {
+        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
+        confirmation = OperationConfirmation(title: "变基当前分支？", message: "将当前分支“\(state.branch)”变基到“\(branch.name)”之上。发生冲突时需手动解决后继续。") { [weak self] in
+            guard let self else { return }
+            self.perform("正在变基…", recover: true) {
+                try await self.git.rebaseCurrentBranch(onto: branch.name, root: state.root)
+                try await self.reload()
+                self.notice = "已将“\(state.branch)”变基到“\(branch.name)”"
+            }
+        }
+    }
+
+    func mergeBranchIntoCurrent(_ branch: GitBranch) {
+        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
+        confirmation = OperationConfirmation(title: "合并分支？", message: "将“\(branch.name)”合并到当前分支“\(state.branch)”。发生冲突时需手动解决后继续。") { [weak self] in
+            guard let self else { return }
+            self.perform("正在合并…", recover: true) {
+                try await self.git.mergeIntoCurrentBranch(branch.name, root: state.root)
+                try await self.reload()
+                self.notice = "已将“\(branch.name)”合并到“\(state.branch)”"
+            }
         }
     }
 

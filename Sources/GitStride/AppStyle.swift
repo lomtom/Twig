@@ -78,6 +78,117 @@ struct StatusBadge: View {
     }
 }
 
+struct KeyboardShortcutHint: View {
+    let keys: String
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(GitStrideStyle.subtleFill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+    }
+}
+
+struct CommandKeyMonitor: NSViewRepresentable {
+    @Binding var isPressed: Bool
+
+    func makeCoordinator() -> Coordinator { Coordinator(isPressed: $isPressed) }
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.install()
+        return NSView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.isPressed = $isPressed
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.remove()
+    }
+
+    final class Coordinator {
+        var isPressed: Binding<Bool>
+        private var monitor: Any?
+
+        init(isPressed: Binding<Bool>) { self.isPressed = isPressed }
+
+        func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                let pressed = event.modifierFlags.contains(.command)
+                if self?.isPressed.wrappedValue != pressed {
+                    DispatchQueue.main.async { self?.isPressed.wrappedValue = pressed }
+                }
+                return event
+            }
+        }
+
+        func remove() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        deinit { remove() }
+    }
+}
+
+enum OperationNotificationKind: Equatable {
+    case success
+    case failure
+
+    var icon: String { self == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill" }
+    var color: Color { self == .success ? GitStrideStyle.accent : .orange }
+}
+
+struct OperationNotification: View {
+    let kind: OperationNotificationKind
+    let message: String
+    var onCopy: (() -> Void)?
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: kind.icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(kind.color)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(kind == .success ? "操作完成" : "操作未完成")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(kind == .success ? 2 : 4)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 4)
+            if let onCopy {
+                Button(action: onCopy) { Image(systemName: "doc.on.doc") }
+                    .buttonStyle(.borderless)
+                    .help("复制错误")
+            }
+            Button(action: dismiss) { Image(systemName: "xmark") }
+                .buttonStyle(.borderless)
+                .help("关闭通知")
+        }
+        .frame(width: 360, alignment: .leading)
+        .padding(12)
+        .background(GitStrideStyle.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(kind.color.opacity(0.35)))
+        .shadow(color: .black.opacity(0.16), radius: 14, y: 5)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(kind == .success ? "操作完成：\(message)" : "操作未完成：\(message)")
+        .task(id: message) {
+            guard kind == .success else { return }
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !Task.isCancelled { dismiss() }
+        }
+    }
+}
+
 extension View {
     func dashboardPanel(fill: Color = GitStrideStyle.panel) -> some View {
         background(fill)

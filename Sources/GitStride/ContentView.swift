@@ -4,6 +4,7 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var model: RepositoryModel
     @State private var destination: WorkspaceDestination? = .commit
+    @State private var commandPressed = false
 
     var body: some View {
         Group {
@@ -12,17 +13,51 @@ struct ContentView: View {
         }
         .tint(GitStrideStyle.accent)
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(CommandKeyMonitor(isPressed: $commandPressed).frame(width: 0, height: 0))
+        .overlay(alignment: .topTrailing) {
+            VStack(alignment: .trailing, spacing: 8) {
+                if let notice = model.notice {
+                    OperationNotification(kind: .success, message: notice) { model.notice = nil }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let error = model.error {
+                    OperationNotification(kind: .failure, message: error, onCopy: {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(error, forType: .string)
+                    }) { model.error = nil }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .padding(20)
+            .animation(.easeOut(duration: 0.2), value: model.notice)
+            .animation(.easeOut(duration: 0.2), value: model.error)
+        }
         .toolbar {
             if let state = model.state {
+                if model.busy {
+                    ToolbarItem(placement: .primaryAction) {
+                        ProgressView().controlSize(.small).help(model.activity)
+                    }
+                }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    if model.busy { ProgressView().controlSize(.small).help(model.activity) }
-                    Button { model.refresh(fetch: true) } label: { Label("获取", systemImage: "arrow.clockwise") }
+                    Button { model.refresh(fetch: true) } label: {
+                        HStack(spacing: 4) {
+                            Label("fetch", systemImage: "arrow.clockwise")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘⇧R") }
+                        }
+                    }
                         .labelStyle(.titleAndIcon).disabled(model.busy).help("获取远程状态并刷新 ⇧⌘R")
                     Button(action: model.pull) {
-                        Label(state.behind > 0 ? "拉取 \(state.behind)" : "拉取", systemImage: "arrow.down")
+                        HStack(spacing: 4) {
+                            Label(state.behind > 0 ? "pull \(state.behind)" : "pull", systemImage: "arrow.down")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘T") }
+                        }
                     }.labelStyle(.titleAndIcon).disabled(!model.canSync || state.upstream == nil).help(state.upstream == nil ? "当前分支尚未设置上游" : "仅快进拉取")
                     Button(action: model.push) {
-                        Label(state.ahead > 0 ? "推送 \(state.ahead)" : "推送", systemImage: "arrow.up")
+                        HStack(spacing: 4) {
+                            Label(state.ahead > 0 ? "push \(state.ahead)" : "push", systemImage: "arrow.up")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘⇧K") }
+                        }
                     }.labelStyle(.titleAndIcon).disabled(!model.canSync || !state.hasHEAD || (state.upstream == nil && state.remote == nil)).help(state.upstream == nil ? "推送并设置同名上游分支" : "推送当前分支")
                     Menu {
                         Button("刷新本地状态", action: { model.refresh() })
@@ -41,10 +76,6 @@ struct ContentView: View {
         } message: { request in Text(request.message) }
         .sheet(isPresented: $model.showClone) { CloneSheet().environmentObject(model) }
         .sheet(isPresented: $model.showBranch) { BranchSheet().environmentObject(model) }
-        .alert("操作未完成", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("复制错误") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(model.error ?? "", forType: .string) }
-            Button("好", role: .cancel) { model.error = nil }
-        } message: { Text((model.error ?? "") + "\n\n如涉及身份验证、冲突或提交身份，请在终端处理后刷新。") }
         .onChange(of: model.focusedFile) { _, _ in model.loadDiff() }
     }
 
@@ -70,13 +101,19 @@ struct ContentView: View {
                 }
                 HStack(spacing: 12) {
                     Button(action: model.chooseRepository) {
-                        Label("打开仓库", systemImage: "folder")
+                        HStack(spacing: 5) {
+                            Label("打开仓库", systemImage: "folder")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘O") }
+                        }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                     }
                     .buttonStyle(.borderedProminent)
                     Button { model.showClone = true } label: {
-                        Label("克隆仓库", systemImage: "arrow.down.to.line")
+                        HStack(spacing: 5) {
+                            Label("克隆仓库", systemImage: "arrow.down.to.line")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘⇧O") }
+                        }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                     }
@@ -163,7 +200,7 @@ struct ContentView: View {
 
     private func workspace(_ state: RepositorySnapshot) -> some View {
         NavigationSplitView {
-            WorkspaceSidebar(selection: $destination)
+            WorkspaceSidebar(selection: $destination, showShortcutHints: commandPressed)
         } detail: {
             switch destination ?? .commit {
             case .commit:
@@ -210,7 +247,12 @@ struct ContentView: View {
     private func changesList(_ state: RepositorySnapshot) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 16) {
-                Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }.help("刷新本地状态 ⌘R").disabled(model.busy)
+                Button { model.refresh() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                        if commandPressed { KeyboardShortcutHint(keys: "⌘R") }
+                    }
+                }.help("刷新本地状态 ⌘R").disabled(model.busy)
                 Button { model.requestFileAction(.rollback) } label: { Image(systemName: "arrow.uturn.backward") }.help("回滚所选文件").disabled(!model.canChangeFiles)
                 Button { model.requestFileAction(.stash) } label: { Image(systemName: "archivebox") }.help("暂存所选文件到 Git Stash").disabled(!model.canChangeFiles || !state.hasHEAD)
                 Spacer(minLength: 0)
@@ -243,7 +285,10 @@ struct ContentView: View {
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(GitStrideStyle.hairline))
                 HStack(spacing: 8) {
                     Button(action: model.commit) {
-                        Label("提交 \(model.selectedPaths.count)", systemImage: "checkmark")
+                        HStack(spacing: 4) {
+                            Label("提交 \(model.selectedPaths.count)", systemImage: "checkmark")
+                            if commandPressed { KeyboardShortcutHint(keys: "⌘↩") }
+                        }
                             .frame(maxWidth: .infinity).padding(.vertical, 5)
                     }.buttonStyle(.borderedProminent).disabled(!model.canCommit)
                         .help("提交所选 \(model.selectedPaths.count) 个文件 ⌘↵")
