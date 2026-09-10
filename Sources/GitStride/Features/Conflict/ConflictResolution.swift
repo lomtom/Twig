@@ -98,14 +98,14 @@ struct ConflictOperationBanner: View {
             Text(conflicts.isEmpty ? "所有冲突已解决，可继续操作" : "\(conflicts.count) 个文件待解决").foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if let first = conflicts.first {
-                Button("Resolve Conflicts…") { model.openConflict(first) }.disabled(model.busy)
+                Button("Resolve Conflicts") { model.openConflict(first) }.disabled(model.busy)
             }
             if state.operation != nil {
                 Button("Continue") { model.requestGraphSequence(abort: false) }.disabled(model.busy || !conflicts.isEmpty)
                 if state.operation == "变基" || state.operation == "挑选提交" {
-                    Button("Skip Commit…") { model.requestSkipSequence() }.disabled(model.busy)
+                    Button("Skip Commit") { model.requestSkipSequence() }.disabled(model.busy)
                 }
-                Button("Abort…", role: .destructive) { model.requestGraphSequence(abort: true) }.disabled(model.busy)
+                Button("Abort", role: .destructive) { model.requestGraphSequence(abort: true) }.disabled(model.busy)
             }
         }.font(.callout).padding(.horizontal, 16).padding(.vertical, 10).background(Color.orange.opacity(0.10))
     }

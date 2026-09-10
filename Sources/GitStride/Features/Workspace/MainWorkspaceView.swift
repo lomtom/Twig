@@ -450,7 +450,7 @@ struct MainWorkspaceView: View {
                 Image(systemName: "arrow.triangle.merge").font(.largeTitle).foregroundStyle(.orange)
                 Text(file.path).font(.headline)
                 Text("比较两侧内容，编辑合并结果后标记为已解决。").foregroundStyle(.secondary)
-                Button("Resolve Conflicts…") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
+                Button("Resolve Conflicts") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let preview = model.sourcePreview {
             SourceFileView(preview: preview, file: file, moveFile: model.moveFocusedFile)
@@ -525,7 +525,7 @@ struct CloneSheet: View {
                     Text(parent?.path ?? "请选择一个父文件夹").lineLimit(1).truncationMode(.middle)
                 }
                 Spacer()
-                Button("选择…") {
+                Button("选择") {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false

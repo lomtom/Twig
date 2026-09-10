@@ -170,7 +170,7 @@ private struct RepositorySwitcher: View {
                 isPresented = false
                 model.chooseRepository()
             } label: {
-                Label("Open Repository…", systemImage: "folder")
+                Label("Open Repository", systemImage: "folder")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -178,7 +178,7 @@ private struct RepositorySwitcher: View {
                 isPresented = false
                 model.showClone = true
             } label: {
-                Label("Clone Repository…", systemImage: "arrow.triangle.branch")
+                Label("Clone Repository", systemImage: "arrow.triangle.branch")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -268,7 +268,7 @@ private struct BranchSwitcher: View {
                 isPresented = false
                 model.showBranch = true
             } label: {
-                Label("Create Branch…", systemImage: "plus")
+                Label("Create Branch", systemImage: "plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -418,8 +418,8 @@ private struct BranchSwitcherRows: View {
             Divider()
             Button("Delete", role: .destructive) { action(branch, .delete) }
                 .disabled(!branch.isRemote && branch.name == current)
-            if !branch.isRemote { Button("Rename…") { action(branch, .rename) } }
-            Button("New Branch…") { action(branch, .newBranch) }
+            if !branch.isRemote { Button("Rename") { action(branch, .rename) } }
+            Button("New Branch") { action(branch, .newBranch) }
             Divider()
             Button("Rebase \(current) onto \(branch.name)") { action(branch, .rebaseOnto) }
                 .disabled(!branch.isRemote && branch.name == current)

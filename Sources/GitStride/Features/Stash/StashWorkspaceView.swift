@@ -115,12 +115,12 @@ struct StashWorkspaceView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                 }.buttonStyle(.borderedProminent).disabled(!canRestore)
                 Button { if let selected { model.requestStashAction(selected, action: .pop) } } label: {
-                    Label("Apply and Drop", systemImage: "tray.and.arrow.up")
+                    Label("Pop", systemImage: "tray.and.arrow.up")
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                 }.buttonStyle(.bordered).disabled(!canRestore)
             }
             Button(role: .destructive) { if let selected { model.requestStashAction(selected, action: .drop) } } label: {
-                Label("Delete Stash Entry", systemImage: "trash")
+                Label("Drop", systemImage: "trash")
                     .frame(maxWidth: .infinity).padding(.vertical, 5)
             }.buttonStyle(.bordered).disabled(model.busy || loadingList || selected == nil)
         }.font(.system(size: 12)).lineLimit(1).padding(14)
@@ -142,7 +142,7 @@ struct StashWorkspaceView: View {
                 Button {
                     model.requestedDestination = .commit
                 } label: {
-                    Label("Go to Commit to Create a Stash", systemImage: "arrow.right")
+                    Label("前往 Commit 创建 Stash", systemImage: "arrow.right")
                 }
                 .buttonStyle(.borderedProminent)
             }

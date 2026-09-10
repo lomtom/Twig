@@ -22,8 +22,8 @@ struct TwigApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open Repository…") { model.chooseRepository() }.keyboardShortcut("o").disabled(model.busy)
-                Button("Clone Repository…") { model.showClone = true }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.busy)
+                Button("Open Repository") { model.chooseRepository() }.keyboardShortcut("o").disabled(model.busy)
+                Button("Clone Repository") { model.showClone = true }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.busy)
             }
             CommandMenu("仓库") {
                 Button("Refresh") { model.refresh() }.keyboardShortcut("r").disabled(model.state == nil || model.busy)

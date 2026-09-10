@@ -75,7 +75,7 @@ struct ChangeTreeView: View {
                 }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(node.path)]) }
                 if !discardableFiles.isEmpty && state.hasHEAD && state.operation == nil {
-                    Button("Discard Folder Changes…", role: .destructive) { model.requestFileAction(.rollback, files: discardableFiles) }
+                    Button("Discard Folder Changes", role: .destructive) { model.requestFileAction(.rollback, files: discardableFiles) }
                         .disabled(model.busy)
                 }
             }
@@ -102,7 +102,7 @@ struct ChangeTreeView: View {
             .accessibilityElement(children: .contain).accessibilityAction(named: "查看源文件") { model.focusedFile = file.path }
             .contextMenu {
                 if file.isConflict {
-                    Button("Resolve Conflicts…") { model.openConflict(file) }.disabled(model.busy)
+                    Button("Resolve Conflicts") { model.openConflict(file) }.disabled(model.busy)
                     Divider()
                 }
                 if file.isUntracked {
@@ -112,7 +112,7 @@ struct ChangeTreeView: View {
                 }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(file.path)]) }
                 if !file.isUntracked && file.index != "A" && state.hasHEAD && state.operation == nil && !file.isConflict {
-                Button("Discard File Changes…", role: .destructive) { model.requestFileAction(.rollback, files: [file]) }.disabled(model.busy)
+                Button("Discard File Changes", role: .destructive) { model.requestFileAction(.rollback, files: [file]) }.disabled(model.busy)
                 }
             }
     }

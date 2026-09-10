@@ -58,44 +58,36 @@ struct GraphCommitContextMenu: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
     var body: some View {
-        Section("复制") {
-            Button("Copy Commit ID") { copy(commit.oid) }
-            Button("Copy Short Commit ID") { copy(commit.shortOID) }
-            Button("Copy Commit Message") { copy(commit.body.isEmpty ? commit.subject : commit.body) }
+        Button("Copy Commit ID") { copy(commit.oid) }
+        Button("Copy Short Commit ID") { copy(commit.shortOID) }
+        Button("Copy Commit Message") { copy(commit.body.isEmpty ? commit.subject : commit.body) }
+        Divider()
+        if commit.parents.count > 1 {
+            Menu("Cherry-pick") {
+                ForEach(commit.parents.indices, id: \.self) { parent in
+                    action("相对父提交 \(parent + 1) · \(commit.parents[parent].prefix(7))", .cherryPick(parent + 1))
+                }
+            }.disabled(!model.canApplyGraphCommit)
+            Menu("Revert Commit") {
+                ForEach(commit.parents.indices, id: \.self) { parent in
+                    action("相对父提交 \(parent + 1) · \(commit.parents[parent].prefix(7))", .revert(parent + 1))
+                }
+            }.disabled(!model.canApplyGraphCommit)
+        } else {
+            action("Cherry-pick", .cherryPick(nil)).disabled(!model.canApplyGraphCommit)
+            action("Revert Commit", .revert(nil)).disabled(!model.canApplyGraphCommit)
         }
-        Section("View") {
-            Button("View Commit Details") { model.selectGraphCommit(commit) }
-        }
-        Section("Apply Commit") {
-            if commit.parents.count > 1 {
-                Menu("Cherry-pick…") {
-                    ForEach(commit.parents.indices, id: \.self) { parent in
-                        action("相对父提交 \(parent + 1) · \(commit.parents[parent].prefix(7))", .cherryPick(parent + 1))
-                    }
-                }.disabled(!model.canApplyGraphCommit)
-                Menu("Revert Commit…") {
-                    ForEach(commit.parents.indices, id: \.self) { parent in
-                        action("相对父提交 \(parent + 1) · \(commit.parents[parent].prefix(7))", .revert(parent + 1))
-                    }
-                }.disabled(!model.canApplyGraphCommit)
-            } else {
-                action("Cherry-pick…", .cherryPick(nil)).disabled(!model.canApplyGraphCommit)
-                action("Revert Commit…", .revert(nil)).disabled(!model.canApplyGraphCommit)
-            }
-        }
-        Section("Move Branch") {
-            action("Reset to Here…", .reset(.mixed)).disabled(!model.canModifyGraphHistory)
-            action("Undo Commit…", .undo)
-                .disabled(!model.canModifyGraphHistory || commit.oid != model.state?.headOID || commit.parents.isEmpty)
-        }
+        Divider()
+        action("Reset to Here", .reset(.mixed)).disabled(!model.canModifyGraphHistory)
+        action("Undo Commit", .undo)
+            .disabled(!model.canModifyGraphHistory || commit.oid != model.state?.headOID || commit.parents.isEmpty)
         if let operation = model.state?.operation, ["挑选提交", "撤销提交"].contains(operation) {
-            Section("In-progress \(operation)") {
-                Button("Continue \(operation)…") { model.requestGraphSequence(abort: false) }
-                    .disabled(model.busy || model.state?.files.contains(where: \.isConflict) == true)
-                Button("Abort \(operation)…", role: .destructive) { model.requestGraphSequence(abort: true) }
-                    .disabled(model.busy)
-                Button("Open Repository in Terminal") { model.openTerminal() }
-            }
+            Divider()
+            Button("Continue \(operation)") { model.requestGraphSequence(abort: false) }
+                .disabled(model.busy || model.state?.files.contains(where: \.isConflict) == true)
+            Button("Abort \(operation)", role: .destructive) { model.requestGraphSequence(abort: true) }
+                .disabled(model.busy)
+            Button("Open Repository in Terminal") { model.openTerminal() }
         }
     }
     private func action(_ title: String, _ action: GraphCommitAction) -> some View {
