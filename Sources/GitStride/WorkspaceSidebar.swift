@@ -182,6 +182,14 @@ private struct RepositorySwitcher: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
+            Button {
+                isPresented = false
+                model.closeRepository()
+            } label: {
+                Label("关闭项目", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {

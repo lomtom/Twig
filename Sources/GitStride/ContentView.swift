@@ -9,7 +9,8 @@ struct ContentView: View {
 
     private var mainContent: some View {
         Group {
-            if let state = model.state { workspace(state) }
+            if model.isRestoringLastRepository { restoringRepository }
+            else if let state = model.state { workspace(state) }
             else { welcome }
         }
         .tint(GitStrideStyle.accent)
@@ -70,6 +71,16 @@ struct ContentView: View {
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar(model.state == nil ? .hidden : .automatic, for: .windowToolbar)
+    }
+
+    private var restoringRepository: some View {
+        VStack(spacing: 12) {
+            ProgressView().controlSize(.regular)
+            Text("正在恢复上次打开的项目…")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var presentedContent: some View {
@@ -301,7 +312,6 @@ struct ContentView: View {
             }.dashboardPanel()
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("提交", systemImage: "checkmark.circle.fill").fontWeight(.semibold)
                     Text(state.branch).lineLimit(1).truncationMode(.middle)
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .padding(.horizontal, 8).padding(.vertical, 3)

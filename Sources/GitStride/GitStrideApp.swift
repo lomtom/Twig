@@ -11,7 +11,7 @@ struct TwigApp: App {
         Window("Twig", id: "main") {
             ContentView().environmentObject(model)
                 .frame(minWidth: 1040, minHeight: 640)
-                .background(WindowChromeConfigurator(isWelcome: model.state == nil).frame(width: 0, height: 0))
+                .background(WindowChromeConfigurator(isWelcome: model.state == nil && !model.isRestoringLastRepository).frame(width: 0, height: 0))
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
         }
         .defaultSize(width: 1200, height: 790)

@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 final class RepositoryModel: ObservableObject {
+    private static let lastRepositoryKey = "lastRepository"
+    private static let shouldRestoreRepositoryKey = "shouldRestoreLastRepository"
     @Published var state: RepositorySnapshot? {
         didSet {
             if oldValue?.root != state?.root { configureRepositoryWatcher() }
@@ -17,7 +19,8 @@ final class RepositoryModel: ObservableObject {
     @Published var activity = ""
     @Published var error: String?
     @Published var notice: String?
-    @Published var recent: [String] = UserDefaults.standard.stringArray(forKey: "recentRepositories") ?? []
+    @Published var recent: [String]
+    @Published private(set) var isRestoringLastRepository: Bool
     @Published var showClone = false
     @Published var showBranch = false
     @Published var fileAction: FileActionRequest?
@@ -27,12 +30,35 @@ final class RepositoryModel: ObservableObject {
     @Published var conflictRequest: ConflictRequest?
     @Published var requestedDestination: WorkspaceDestination?
     private var restoredLastRepository = false
+    private var repositoryPathToRestore: String?
+
+    init() {
+        let defaults = UserDefaults.standard
+        let recentPaths = defaults.stringArray(forKey: "recentRepositories") ?? []
+        let path = defaults.string(forKey: Self.lastRepositoryKey) ?? recentPaths.first
+        // Existing installations restored their last repository unconditionally;
+        // retain that behavior until the user explicitly closes a project.
+        let shouldRestore = defaults.object(forKey: Self.shouldRestoreRepositoryKey) == nil
+            ? path != nil
+            : defaults.bool(forKey: Self.shouldRestoreRepositoryKey)
+        recent = recentPaths
+        repositoryPathToRestore = shouldRestore ? path : nil
+        isRestoringLastRepository = repositoryPathToRestore != nil
+    }
 
     func restoreLastRepository() {
         guard !restoredLastRepository else { return }
         restoredLastRepository = true
-        guard state == nil, let path = UserDefaults.standard.string(forKey: "lastRepository") ?? recent.first else { return }
-        if FileManager.default.fileExists(atPath: path) { open(URL(fileURLWithPath: path)) }
+        guard state == nil, let path = repositoryPathToRestore else {
+            isRestoringLastRepository = false
+            return
+        }
+        guard FileManager.default.fileExists(atPath: path) else {
+            UserDefaults.standard.set(false, forKey: Self.shouldRestoreRepositoryKey)
+            isRestoringLastRepository = false
+            return
+        }
+        open(URL(fileURLWithPath: path), restoringLastRepository: true)
     }
 
     @Published var stashRevision = UUID()
@@ -86,8 +112,10 @@ final class RepositoryModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { open(url) }
     }
 
-    func open(_ url: URL) {
-        perform("正在打开仓库…") {
+    func open(_ url: URL, restoringLastRepository: Bool = false) {
+        perform("正在打开仓库…", onFinished: { [weak self] in
+            if restoringLastRepository { self?.isRestoringLastRepository = false }
+        }) {
             let root = try await self.git.open(url)
             let snapshot = try await self.git.snapshot(root)
             self.diffTask?.cancel()
@@ -101,9 +129,24 @@ final class RepositoryModel: ObservableObject {
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
             UserDefaults.standard.set(self.recent, forKey: "recentRepositories")
-            UserDefaults.standard.set(root.path, forKey: "lastRepository")
+            UserDefaults.standard.set(root.path, forKey: Self.lastRepositoryKey)
+            UserDefaults.standard.set(true, forKey: Self.shouldRestoreRepositoryKey)
             self.loadDiff()
         }
+    }
+
+    func closeRepository() {
+        guard !busy else { return }
+        diffTask?.cancel()
+        diffGeneration = UUID()
+        sourcePreview = nil
+        loadingDiff = false
+        selectedPaths = []
+        focusedFile = nil
+        message = ""
+        resetGraph()
+        state = nil
+        UserDefaults.standard.set(false, forKey: Self.shouldRestoreRepositoryKey)
     }
 
     private var repositoryWatcher: RepositoryWatcher?
@@ -466,7 +509,8 @@ final class RepositoryModel: ObservableObject {
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
             UserDefaults.standard.set(self.recent, forKey: "recentRepositories")
-            UserDefaults.standard.set(root.path, forKey: "lastRepository")
+            UserDefaults.standard.set(root.path, forKey: Self.lastRepositoryKey)
+            UserDefaults.standard.set(true, forKey: Self.shouldRestoreRepositoryKey)
             self.loadDiff()
             self.notice = "仓库已克隆"
         }
@@ -651,7 +695,7 @@ final class RepositoryModel: ObservableObject {
         }
     }
 
-    private func perform(_ label: String, recover: Bool = false, operation: @escaping @MainActor () async throws -> Void) {
+    private func perform(_ label: String, recover: Bool = false, onFinished: (@MainActor () -> Void)? = nil, operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
         if localRefreshRunning || localRefreshPending {
             localRefreshTask?.cancel()
@@ -677,6 +721,7 @@ final class RepositoryModel: ObservableObject {
             busy = false
             activity = ""
             resumeLocalRefresh()
+            onFinished?()
         }
     }
 

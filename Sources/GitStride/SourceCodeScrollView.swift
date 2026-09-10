@@ -4,6 +4,7 @@ import SwiftUI
 private let sourceRowHeight: CGFloat = 23
 private let sourceTopInset: CGFloat = 10
 private let gutterWidth: CGFloat = 116
+private let sourceChangeOverviewWidth: CGFloat = 4
 
 private func sourceChangeColor(_ kind: SourceLine.Kind) -> NSColor {
     switch kind {
@@ -53,6 +54,7 @@ final class SourceScrollContainer: NSView {
     private let scrollView = NSScrollView()
     private let code = SourceTextView()
     private let gutter = SourceGutterView()
+    private let changeOverview = SourceChangeOverviewView()
     var moveFile: ((Int) -> Void)? { didSet { code.moveFile = moveFile } }
     private var displayedLines: [SourceLine] = []
     private var previewID: UUID?
@@ -82,8 +84,10 @@ final class SourceScrollContainer: NSView {
         code.setAccessibilityLabel("源文件代码")
         scrollView.documentView = code
         gutter.scrollView = scrollView
+        changeOverview.scrollView = scrollView
         addSubview(scrollView)
         addSubview(gutter)
+        addSubview(changeOverview)
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(didScroll), name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
     }
@@ -99,6 +103,7 @@ final class SourceScrollContainer: NSView {
             rows = preview.lines.count
             code.lines = preview.lines
             gutter.lines = preview.lines
+            changeOverview.lines = preview.lines
             let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
             let paragraph = NSMutableParagraphStyle()
             paragraph.minimumLineHeight = sourceRowHeight
@@ -122,6 +127,7 @@ final class SourceScrollContainer: NSView {
             }
             code.needsDisplay = true
             gutter.needsDisplay = true
+            changeOverview.needsDisplay = true
         }
         if self.navigationID != navigationID {
             self.navigationID = navigationID
@@ -134,6 +140,13 @@ final class SourceScrollContainer: NSView {
         super.layout()
         gutter.frame = NSRect(x: 0, y: 0, width: gutterWidth, height: bounds.height)
         scrollView.frame = NSRect(x: gutterWidth, y: 0, width: max(0, bounds.width - gutterWidth), height: bounds.height)
+        let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: scrollView.scrollerStyle)
+        changeOverview.frame = NSRect(
+            x: max(gutterWidth, scrollView.frame.maxX - scrollerWidth - sourceChangeOverviewWidth - 5),
+            y: 5,
+            width: sourceChangeOverviewWidth,
+            height: max(0, bounds.height - 10)
+        )
         let width = max(contentWidth, scrollView.contentSize.width)
         let height = max(CGFloat(rows) * sourceRowHeight + sourceTopInset * 2, scrollView.contentSize.height)
         code.textContainer?.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
@@ -145,6 +158,7 @@ final class SourceScrollContainer: NSView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         gutter.needsDisplay = true
+        changeOverview.needsDisplay = true
     }
 
     @objc private func didScroll() { gutter.needsDisplay = true }
@@ -205,5 +219,42 @@ private final class SourceGutterView: NSView {
         }
         NSColor.separatorColor.setFill()
         NSRect(x: bounds.width - 1, y: 0, width: 1, height: bounds.height).fill()
+    }
+}
+
+/// Shows the location of every changed line against the whole file, beside the vertical scroller.
+private final class SourceChangeOverviewView: NSView {
+    weak var scrollView: NSScrollView?
+    var lines: [SourceLine] = []
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !lines.isEmpty, bounds.height > 0 else { return }
+        let documentHeight = max(
+            CGFloat(lines.count) * sourceRowHeight + sourceTopInset * 2,
+            scrollView?.documentView?.bounds.height ?? 0
+        )
+        guard documentHeight > 0 else { return }
+
+        let availableHeight = bounds.height
+        let minimumMarkerHeight: CGFloat = 3
+        let scaledRowHeight = max(minimumMarkerHeight, sourceRowHeight / documentHeight * availableHeight)
+        NSColor.systemBlue.withAlphaComponent(0.78).setFill()
+
+        for index in lines.indices where lines[index].kind != .context {
+            let documentY = sourceTopInset + CGFloat(index) * sourceRowHeight
+            let y = documentY / documentHeight * availableHeight
+            NSRect(x: 0, y: y, width: bounds.width, height: scaledRowHeight).fill()
+        }
+    }
+
+    override func scrollWheel(with event: NSEvent) { scrollView?.scrollWheel(with: event) }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let scrollView, let documentView = scrollView.documentView, bounds.height > 0 else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let targetY = min(max(0, location.y / bounds.height * documentView.bounds.height - scrollView.contentSize.height * 0.5), max(0, documentView.bounds.height - scrollView.contentSize.height))
+        scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 }

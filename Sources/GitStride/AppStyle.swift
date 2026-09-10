@@ -112,16 +112,16 @@ struct CommandKeyMonitor: NSViewRepresentable {
     final class Coordinator {
         var isPressed: Binding<Bool>
         private var monitor: Any?
+        private var commandIsDown = false
+        private var delayedHint: DispatchWorkItem?
+        private var hintShouldBeVisible = false
 
         init(isPressed: Binding<Bool>) { self.isPressed = isPressed }
 
         func install() {
             guard monitor == nil else { return }
             monitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-                let pressed = event.modifierFlags.contains(.command)
-                if self?.isPressed.wrappedValue != pressed {
-                    DispatchQueue.main.async { self?.isPressed.wrappedValue = pressed }
-                }
+                self?.updateCommandState(event.modifierFlags.contains(.command))
                 return event
             }
         }
@@ -129,9 +129,42 @@ struct CommandKeyMonitor: NSViewRepresentable {
         func remove() {
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
+            delayedHint?.cancel()
+            delayedHint = nil
+            commandIsDown = false
+            setHintVisible(false)
         }
 
         deinit { remove() }
+
+        private func updateCommandState(_ isDown: Bool) {
+            guard commandIsDown != isDown else { return }
+            commandIsDown = isDown
+
+            if isDown {
+                delayedHint?.cancel()
+                let hint = DispatchWorkItem { [weak self] in
+                    guard let self, self.commandIsDown else { return }
+                    self.delayedHint = nil
+                    self.setHintVisible(true)
+                }
+                delayedHint = hint
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(500), execute: hint)
+            } else {
+                delayedHint?.cancel()
+                delayedHint = nil
+                setHintVisible(false)
+            }
+        }
+
+        private func setHintVisible(_ visible: Bool) {
+            hintShouldBeVisible = visible
+            guard isPressed.wrappedValue != visible else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.hintShouldBeVisible == visible else { return }
+                self.isPressed.wrappedValue = visible
+            }
+        }
     }
 }
 

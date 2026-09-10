@@ -32,9 +32,9 @@ struct SourceFileView: View {
                 StatusBadge(text: "−\(preview.deletions)", color: .red)
                 HStack(spacing: 2) {
                     Button { navigate(-1) } label: { Image(systemName: "chevron.up").frame(width: 22, height: 22) }
-                        .help("上一处改动").disabled(changes.isEmpty)
+                        .help("上一处改动").disabled(changes.isEmpty || changeIndex == 0)
                     Button { navigate(1) } label: { Image(systemName: "chevron.down").frame(width: 22, height: 22) }
-                        .help("下一处改动").disabled(changes.isEmpty)
+                        .help("下一处改动").disabled(changes.isEmpty || changeIndex == changes.count - 1)
                 }.buttonStyle(.borderless)
                     .background(GitStrideStyle.subtleFill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }.padding(.horizontal, 14).frame(height: 48).background(GitStrideStyle.panelHeader)
@@ -58,8 +58,9 @@ struct SourceFileView: View {
     }
 
     private func navigate(_ direction: Int) {
-        guard !changes.isEmpty else { return }
-        changeIndex = (changeIndex + direction + changes.count) % changes.count
+        let nextIndex = changeIndex + direction
+        guard changes.indices.contains(nextIndex) else { return }
+        changeIndex = nextIndex
         targetLine = changes[changeIndex]
         navigationID = UUID()
     }
