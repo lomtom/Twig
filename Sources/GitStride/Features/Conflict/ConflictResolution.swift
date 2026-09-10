@@ -98,14 +98,14 @@ struct ConflictOperationBanner: View {
             Text(conflicts.isEmpty ? "所有冲突已解决，可继续操作" : "\(conflicts.count) 个文件待解决").foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if let first = conflicts.first {
-                Button("解决冲突…") { model.openConflict(first) }.disabled(model.busy)
+                Button("Resolve Conflicts…") { model.openConflict(first) }.disabled(model.busy)
             }
             if state.operation != nil {
-                Button("继续") { model.requestGraphSequence(abort: false) }.disabled(model.busy || !conflicts.isEmpty)
+                Button("Continue") { model.requestGraphSequence(abort: false) }.disabled(model.busy || !conflicts.isEmpty)
                 if state.operation == "变基" || state.operation == "挑选提交" {
-                    Button("跳过提交…") { model.requestSkipSequence() }.disabled(model.busy)
+                    Button("Skip Commit…") { model.requestSkipSequence() }.disabled(model.busy)
                 }
-                Button("中止…", role: .destructive) { model.requestGraphSequence(abort: true) }.disabled(model.busy)
+                Button("Abort…", role: .destructive) { model.requestGraphSequence(abort: true) }.disabled(model.busy)
             }
         }.font(.callout).padding(.horizontal, 16).padding(.vertical, 10).background(Color.orange.opacity(0.10))
     }
@@ -129,10 +129,10 @@ struct ConflictResolutionSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("解决冲突", systemImage: "arrow.triangle.merge").font(.title2.weight(.semibold))
+                Label("Resolve Conflicts", systemImage: "arrow.triangle.merge").font(.title2.weight(.semibold))
                 Text(request.file.path).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                 Spacer()
-                Toggle("查看共同祖先", isOn: $showBase).toggleStyle(.button).disabled(document == nil)
+                Toggle("Show Common Ancestor", isOn: $showBase).toggleStyle(.button).disabled(document == nil)
             }
             if request.expected.operation == "变基" {
                 Text("变基时，当前版本是目标分支及已重放的提交；传入版本是正在重放的提交。").font(.caption).foregroundStyle(.secondary)
@@ -171,9 +171,9 @@ struct ConflictResolutionSheet: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("冲突 \(chunk.id + 1)").font(.caption).foregroundStyle(.secondary)
                                     HStack {
-                                        Button("当前") { replace(chunk, with: chunk.ours) }
-                                        Button("传入") { replace(chunk, with: chunk.theirs) }
-                                        Button("两者") { replace(chunk, with: chunk.ours + chunk.theirs) }
+                                        Button("Use Current") { replace(chunk, with: chunk.ours) }
+                                        Button("Use Incoming") { replace(chunk, with: chunk.theirs) }
+                                        Button("Use Both") { replace(chunk, with: chunk.ours + chunk.theirs) }
                                     }.controlSize(.small)
                                 }.padding(9).background(GitStrideStyle.subtleFill, in: RoundedRectangle(cornerRadius: 8))
                             }
@@ -184,12 +184,12 @@ struct ConflictResolutionSheet: View {
                     Button(document.ours == nil ? "采用当前侧删除" : "采用整个当前版本") { confirm(.ours) }.disabled(!document.canSelectSide)
                     Button(document.theirs == nil ? "采用传入侧删除" : "采用整个传入版本") { confirm(.theirs) }.disabled(!document.canSelectSide)
                     if !document.canEdit {
-                        Button("标记工作区文件已解决") { confirm(.workingTree) }
+                        Button("Mark Working Tree File Resolved") { confirm(.workingTree) }
                     }
                     Spacer()
                     Button("取消") { close() }.keyboardShortcut(.cancelAction)
                     if document.canEdit {
-                        Button("保存并标记已解决") { save(.edited(result)) }.buttonStyle(.borderedProminent)
+                        Button("Save and Mark Resolved") { save(.edited(result)) }.buttonStyle(.borderedProminent)
                             .disabled(MergeChunk.containsMarkers(result))
                     }
                 }

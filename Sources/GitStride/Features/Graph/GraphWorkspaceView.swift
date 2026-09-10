@@ -120,13 +120,13 @@ struct GraphWorkspaceView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            TextField("搜索提交、分支或 SHA", text: $model.graphQuery)
+            TextField("Search commits, branches, or SHA", text: $model.graphQuery)
                 .textFieldStyle(.roundedBorder).frame(minWidth: 100, maxWidth: 230)
-            Picker("分支范围", selection: $model.graphScope) {
+            Picker("Branch Scope", selection: $model.graphScope) {
                 ForEach(GraphScope.allCases) { Text($0.rawValue).tag($0) }
             }.labelsHidden().pickerStyle(.menu).frame(width: 100).disabled(model.graphLoading)
-            Picker("提交人", selection: $model.graphAuthor) {
-                Text("所有提交人").tag(String?.none)
+            Picker("Author", selection: $model.graphAuthor) {
+                Text("All Authors").tag(String?.none)
                 ForEach(authors, id: \.self) { Text($0).tag(Optional($0)) }
             }.labelsHidden().pickerStyle(.menu).frame(width: 110)
                 .help("按提交人筛选，与搜索条件同时生效")
@@ -178,9 +178,9 @@ struct GraphWorkspaceView: View {
                                     Text(matches.isEmpty ? "没有匹配的提交" : "匹配 \(matches.count) 条")
                                     Text("保留完整提交关系").foregroundStyle(.tertiary)
                                     Spacer()
-                                    Button("上一个") { navigateMatch(matches, step: -1, proxy: proxy) }.disabled(matches.isEmpty)
-                                    Button("下一个") { navigateMatch(matches, step: 1, proxy: proxy) }.disabled(matches.isEmpty)
-                                    Button("清除") { model.graphQuery = ""; model.graphAuthor = nil }
+                                    Button("Previous") { navigateMatch(matches, step: -1, proxy: proxy) }.disabled(matches.isEmpty)
+                                    Button("Next") { navigateMatch(matches, step: 1, proxy: proxy) }.disabled(matches.isEmpty)
+                                    Button("Clear") { model.graphQuery = ""; model.graphAuthor = nil }
                                 }.font(.caption).buttonStyle(.borderless)
                                     .padding(.horizontal, 14).frame(height: 30)
                                     .background(GitStrideStyle.panelHeader)

@@ -63,9 +63,9 @@ struct MainWorkspaceView: View {
                         }
                     }.labelStyle(.titleAndIcon).disabled(!model.canSync || !state.hasHEAD || (state.upstream == nil && state.remote == nil)).help(state.upstream == nil ? "推送并设置同名上游分支" : "推送当前分支")
                     Menu {
-                        Button("刷新本地状态", action: { model.refresh() })
-                        Button("在 Finder 中显示", action: model.revealRepository)
-                        Button("在终端中打开", action: model.openTerminal)
+                        Button("Refresh Local Status", action: { model.refresh() })
+                        Button("Show in Finder", action: model.revealRepository)
+                        Button("Open in Terminal", action: model.openTerminal)
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
@@ -145,7 +145,7 @@ struct MainWorkspaceView: View {
                 HStack(spacing: 12) {
                     Button(action: model.chooseRepository) {
                         HStack(spacing: 5) {
-                            Label("打开仓库", systemImage: "folder")
+                            Label("Open Repository", systemImage: "folder")
                             if commandPressed { KeyboardShortcutHint(keys: "⌘O") }
                         }
                             .padding(.horizontal, 8)
@@ -154,7 +154,7 @@ struct MainWorkspaceView: View {
                     .buttonStyle(.borderedProminent)
                     Button { model.showClone = true } label: {
                         HStack(spacing: 5) {
-                            Label("克隆仓库", systemImage: "arrow.down.to.line")
+                            Label("Clone Repository", systemImage: "arrow.down.to.line")
                             if commandPressed { KeyboardShortcutHint(keys: "⌘⇧O") }
                         }
                             .padding(.horizontal, 8)
@@ -396,14 +396,14 @@ struct MainWorkspaceView: View {
                 HStack(spacing: 8) {
                     Button(action: model.commit) {
                         HStack(spacing: 4) {
-                            Label("提交 \(model.selectedPaths.count)", systemImage: "checkmark")
+                            Label("Commit \(model.selectedPaths.count)", systemImage: "checkmark")
                             if commandPressed { KeyboardShortcutHint(keys: "⌘↩") }
                         }
                             .frame(maxWidth: .infinity).padding(.vertical, 5)
                     }.buttonStyle(.borderedProminent).disabled(!model.canCommit)
                         .help("提交所选 \(model.selectedPaths.count) 个文件 ⌘↵")
                     Button(action: model.commitAndPush) {
-                        Label("提交并推送", systemImage: "arrow.up")
+                        Label("Commit and Push", systemImage: "arrow.up")
                             .frame(maxWidth: .infinity).padding(.vertical, 5)
                     }.buttonStyle(.bordered).disabled(!model.canCommitAndPush)
                         .help("提交所选文件后推送当前分支")
@@ -450,7 +450,7 @@ struct MainWorkspaceView: View {
                 Image(systemName: "arrow.triangle.merge").font(.largeTitle).foregroundStyle(.orange)
                 Text(file.path).font(.headline)
                 Text("比较两侧内容，编辑合并结果后标记为已解决。").foregroundStyle(.secondary)
-                Button("解决冲突…") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
+                Button("Resolve Conflicts…") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let preview = model.sourcePreview {
             SourceFileView(preview: preview, file: file, moveFile: model.moveFocusedFile)
@@ -478,13 +478,13 @@ struct BranchSheet: View {
     @State private var name = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label("创建分支", systemImage: "arrow.triangle.branch").font(.title2).fontWeight(.semibold)
+            Label("Create Branch", systemImage: "arrow.triangle.branch").font(.title2).fontWeight(.semibold)
             Text("从当前提交创建并切换到新分支。").foregroundStyle(.secondary)
             TextField("例如 feature/new-idea", text: $name).textFieldStyle(.roundedBorder).onSubmit(create)
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("创建并切换", action: create).buttonStyle(.borderedProminent).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+                Button("Create and Switch", action: create).buttonStyle(.borderedProminent).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
             }
         }.padding(28).frame(width: 400)
     }
@@ -505,7 +505,7 @@ struct CloneSheet: View {
     @State private var validation: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label("克隆仓库", systemImage: "square.and.arrow.down").font(.title2).fontWeight(.semibold)
+            Label("Clone Repository", systemImage: "square.and.arrow.down").font(.title2).fontWeight(.semibold)
             Text("支持 HTTPS 和 SSH，使用你已配置的 Git 凭据。").font(.callout).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 8) {
                 Text("仓库地址").font(.caption).foregroundStyle(.secondary)
@@ -538,7 +538,7 @@ struct CloneSheet: View {
             HStack {
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("克隆仓库") { clone() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                Button("Clone Repository") { clone() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || folderName.isEmpty || parent == nil)
             }
         }.padding(28).frame(width: 480)

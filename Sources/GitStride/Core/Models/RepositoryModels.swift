@@ -21,11 +21,11 @@ struct ChangedFile: Identifiable, Hashable {
         index == "U" || worktree == "U" || (index == "A" && worktree == "A") || (index == "D" && worktree == "D")
     }
     var status: String {
-        if isConflict { return "冲突" }
-        if isUntracked || index == "A" || worktree == "A" { return "新增" }
-        if index == "D" || worktree == "D" { return "删除" }
-        if index == "R" || worktree == "R" { return "重命名" }
-        return "修改"
+        if isConflict { return "Conflict" }
+        if isUntracked || index == "A" || worktree == "A" { return "Added" }
+        if index == "D" || worktree == "D" { return "Deleted" }
+        if index == "R" || worktree == "R" { return "Renamed" }
+        return "Modified"
     }
     var commitPaths: [String] { previousPath.map { [$0, path] } ?? [path] }
 }

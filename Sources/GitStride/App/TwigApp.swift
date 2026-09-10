@@ -22,19 +22,19 @@ struct TwigApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("打开仓库…") { model.chooseRepository() }.keyboardShortcut("o").disabled(model.busy)
-                Button("克隆仓库…") { model.showClone = true }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.busy)
+                Button("Open Repository…") { model.chooseRepository() }.keyboardShortcut("o").disabled(model.busy)
+                Button("Clone Repository…") { model.showClone = true }.keyboardShortcut("o", modifiers: [.command, .shift]).disabled(model.busy)
             }
             CommandMenu("仓库") {
-                Button("刷新") { model.refresh() }.keyboardShortcut("r").disabled(model.state == nil || model.busy)
-                Button("获取远程状态") { model.refresh(fetch: true) }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(model.state == nil || model.busy)
+                Button("Refresh") { model.refresh() }.keyboardShortcut("r").disabled(model.state == nil || model.busy)
+                Button("Fetch Remote Status") { model.refresh(fetch: true) }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(model.state == nil || model.busy)
                 Divider()
-                Button("提交所选文件") { model.commit() }.keyboardShortcut(.return, modifiers: .command).disabled(!model.canCommit)
-                Button("拉取") { model.pull() }.keyboardShortcut("t").disabled(!model.canSync || model.state?.upstream == nil)
-                Button("推送") { model.push() }.keyboardShortcut("k", modifiers: [.command, .shift]).disabled(!model.canSync || model.state?.hasHEAD != true)
+                Button("Commit Selected Files") { model.commit() }.keyboardShortcut(.return, modifiers: .command).disabled(!model.canCommit)
+                Button("Pull") { model.pull() }.keyboardShortcut("t").disabled(!model.canSync || model.state?.upstream == nil)
+                Button("Push") { model.push() }.keyboardShortcut("k", modifiers: [.command, .shift]).disabled(!model.canSync || model.state?.hasHEAD != true)
                 Divider()
-                Button("在 Finder 中显示") { model.revealRepository() }.disabled(model.state == nil)
-                Button("在终端中打开") { model.openTerminal() }.disabled(model.state == nil)
+                Button("Show in Finder") { model.revealRepository() }.disabled(model.state == nil)
+                Button("Open in Terminal") { model.openTerminal() }.disabled(model.state == nil)
             }
         }
     }

@@ -170,7 +170,7 @@ private struct RepositorySwitcher: View {
                 isPresented = false
                 model.chooseRepository()
             } label: {
-                Label("打开仓库…", systemImage: "folder")
+                Label("Open Repository…", systemImage: "folder")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -178,7 +178,7 @@ private struct RepositorySwitcher: View {
                 isPresented = false
                 model.showClone = true
             } label: {
-                Label("克隆仓库…", systemImage: "arrow.triangle.branch")
+                Label("Clone Repository…", systemImage: "arrow.triangle.branch")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -186,7 +186,7 @@ private struct RepositorySwitcher: View {
                 isPresented = false
                 model.closeRepository()
             } label: {
-                Label("关闭项目", systemImage: "xmark.circle")
+                Label("Close Repository", systemImage: "xmark.circle")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -268,7 +268,7 @@ private struct BranchSwitcher: View {
                 isPresented = false
                 model.showBranch = true
             } label: {
-                Label("创建分支…", systemImage: "plus")
+                Label("Create Branch…", systemImage: "plus")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
             }
@@ -276,9 +276,9 @@ private struct BranchSwitcher: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if let state = model.state {
-                        branchSection("本地分支", branches: state.localBranches, current: state.branch, id: "local")
+                        branchSection("Local Branches", branches: state.localBranches, current: state.branch, id: "local")
                         Divider().padding(.vertical, 4)
-                        branchSection("远程分支", branches: state.remoteBranches, current: state.branch, id: "remote")
+                        branchSection("Remote Branches", branches: state.remoteBranches, current: state.branch, id: "remote")
                     }
                 }
             }

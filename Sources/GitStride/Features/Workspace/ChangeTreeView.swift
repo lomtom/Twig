@@ -69,13 +69,13 @@ struct ChangeTreeView: View {
         }
             .contextMenu {
                 if isUntrackedDirectory {
-                    Button("添加到 Git") { model.addToGit(files) }
+                    Button("Add to Git") { model.addToGit(files) }
                         .disabled(model.busy || state.operation != nil)
                     Divider()
                 }
-                Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(node.path)]) }
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(node.path)]) }
                 if !discardableFiles.isEmpty && state.hasHEAD && state.operation == nil {
-                    Button("丢弃目录改动…", role: .destructive) { model.requestFileAction(.rollback, files: discardableFiles) }
+                    Button("Discard Folder Changes…", role: .destructive) { model.requestFileAction(.rollback, files: discardableFiles) }
                         .disabled(model.busy)
                 }
             }
@@ -102,17 +102,17 @@ struct ChangeTreeView: View {
             .accessibilityElement(children: .contain).accessibilityAction(named: "查看源文件") { model.focusedFile = file.path }
             .contextMenu {
                 if file.isConflict {
-                    Button("解决冲突…") { model.openConflict(file) }.disabled(model.busy)
+                    Button("Resolve Conflicts…") { model.openConflict(file) }.disabled(model.busy)
                     Divider()
                 }
                 if file.isUntracked {
-                    Button("添加到 Git") { model.addToGit(file) }
+                    Button("Add to Git") { model.addToGit(file) }
                         .disabled(model.busy || state.operation != nil)
                     Divider()
                 }
-                Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(file.path)]) }
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.root.appendingPathComponent(file.path)]) }
                 if !file.isUntracked && file.index != "A" && state.hasHEAD && state.operation == nil && !file.isConflict {
-                    Button("丢弃文件改动…", role: .destructive) { model.requestFileAction(.rollback, files: [file]) }.disabled(model.busy)
+                Button("Discard File Changes…", role: .destructive) { model.requestFileAction(.rollback, files: [file]) }.disabled(model.busy)
                 }
             }
     }

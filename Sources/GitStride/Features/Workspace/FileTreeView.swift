@@ -92,10 +92,10 @@ extension ChangedFile {
         if isUntracked { return GitStrideStyle.unversioned }
         if isConflict { return .orange }
         switch status {
-        case "新增": return GitStrideStyle.added
-        case "删除": return .red
-        case "修改": return GitStrideStyle.modified
-        case "重命名": return .orange
+        case "Added": return GitStrideStyle.added
+        case "Deleted": return .red
+        case "Modified": return GitStrideStyle.modified
+        case "Renamed": return .orange
         default: return .secondary
         }
     }

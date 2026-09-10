@@ -41,7 +41,7 @@ struct FileActionSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label(isStash ? "暂存改动" : "确认回滚文件", systemImage: isStash ? "archivebox" : "arrow.uturn.backward")
+            Label(isStash ? "Stash Changes" : "Roll Back Files", systemImage: isStash ? "archivebox" : "arrow.uturn.backward")
                 .font(.title2).fontWeight(.semibold)
             Text(isStash ? "将所选文件保存到 Git Stash，并从工作区移除这些改动。" : "已跟踪文件恢复到 HEAD，已暂存和未暂存的改动都会丢失；新增文件移入废纸篓。")
                 .font(.callout).foregroundStyle(.secondary)
@@ -69,7 +69,7 @@ struct FileActionSheet: View {
                 Text("\(selected.count) 个文件").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isStash ? "暂存" : "确认回滚", role: isStash ? nil : .destructive) {
+                Button(isStash ? "Stash" : "Roll Back", role: isStash ? nil : .destructive) {
                     model.executeFileAction(request, paths: selected, message: message)
                     dismiss()
                 }.buttonStyle(.borderedProminent)
@@ -98,7 +98,7 @@ struct GraphActionSheet: View {
                 Text(request.commit.oid).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).foregroundStyle(.secondary)
             }
             if case .reset = request.action {
-                Picker("重置类型", selection: $resetMode) {
+                Picker("Reset Mode", selection: $resetMode) {
                     ForEach(GraphResetMode.allCases) { mode in Text(mode.title).tag(mode) }
                 }.pickerStyle(.radioGroup)
             }

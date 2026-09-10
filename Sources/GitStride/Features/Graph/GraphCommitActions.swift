@@ -6,9 +6,9 @@ enum GraphResetMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .soft: return "Soft · 保留暂存区与工作区"
-        case .mixed: return "Mixed · 保留工作区，取消暂存"
-        case .hard: return "Hard · 丢弃本地改动"
+        case .soft: return "Soft · Keep Index and Working Tree"
+        case .mixed: return "Mixed · Keep Working Tree, Unstage Changes"
+        case .hard: return "Hard · Discard Local Changes"
         }
     }
 }
@@ -61,12 +61,12 @@ struct GraphCommitContextMenu: View {
         Section("复制") {
             Button("Copy Commit ID") { copy(commit.oid) }
             Button("Copy Short Commit ID") { copy(commit.shortOID) }
-            Button("复制提交信息") { copy(commit.body.isEmpty ? commit.subject : commit.body) }
+            Button("Copy Commit Message") { copy(commit.body.isEmpty ? commit.subject : commit.body) }
         }
-        Section("查看") {
-            Button("查看提交详情") { model.selectGraphCommit(commit) }
+        Section("View") {
+            Button("View Commit Details") { model.selectGraphCommit(commit) }
         }
-        Section("应用提交") {
+        Section("Apply Commit") {
             if commit.parents.count > 1 {
                 Menu("Cherry-pick…") {
                     ForEach(commit.parents.indices, id: \.self) { parent in
@@ -83,18 +83,18 @@ struct GraphCommitContextMenu: View {
                 action("Revert Commit…", .revert(nil)).disabled(!model.canApplyGraphCommit)
             }
         }
-        Section("移动分支") {
+        Section("Move Branch") {
             action("Reset to Here…", .reset(.mixed)).disabled(!model.canModifyGraphHistory)
-            action("Undo Commit · 保留改动…", .undo)
+            action("Undo Commit…", .undo)
                 .disabled(!model.canModifyGraphHistory || commit.oid != model.state?.headOID || commit.parents.isEmpty)
         }
         if let operation = model.state?.operation, ["挑选提交", "撤销提交"].contains(operation) {
-            Section("进行中的\(operation)") {
-                Button("继续\(operation)…") { model.requestGraphSequence(abort: false) }
+            Section("In-progress \(operation)") {
+                Button("Continue \(operation)…") { model.requestGraphSequence(abort: false) }
                     .disabled(model.busy || model.state?.files.contains(where: \.isConflict) == true)
-                Button("中止\(operation)…", role: .destructive) { model.requestGraphSequence(abort: true) }
+                Button("Abort \(operation)…", role: .destructive) { model.requestGraphSequence(abort: true) }
                     .disabled(model.busy)
-                Button("在终端打开仓库") { model.openTerminal() }
+                Button("Open Repository in Terminal") { model.openTerminal() }
             }
         }
     }

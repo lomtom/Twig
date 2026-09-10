@@ -1,14 +1,14 @@
 import Foundation
 
 enum GraphScope: String, CaseIterable, Identifiable {
-    case currentBranch = "当前分支"
-    case allBranches = "所有分支"
+    case currentBranch = "Current Branch"
+    case allBranches = "All Branches"
     var id: String { rawValue }
 }
 
 enum GraphSort: String, CaseIterable, Identifiable {
-    case topology = "拓扑排序"
-    case time = "时间排序"
+    case topology = "Topological Order"
+    case time = "Date Order"
     var id: String { rawValue }
     // Both modes keep parents below children so all graph edges remain valid.
     var argument: String { self == .topology ? "--topo-order" : "--author-date-order" }
@@ -51,10 +51,10 @@ struct GraphChangedFile: Identifiable, Hashable {
     }
     var label: String {
         switch status.first {
-        case "A": return "新增"
-        case "D": return "删除"
-        case "R": return "重命名"
-        default: return "修改"
+        case "A": return "Added"
+        case "D": return "Deleted"
+        case "R": return "Renamed"
+        default: return "Modified"
         }
     }
 }
