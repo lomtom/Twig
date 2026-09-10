@@ -3,7 +3,11 @@ import SwiftUI
 
 @MainActor
 final class RepositoryModel: ObservableObject {
-    @Published var state: RepositorySnapshot?
+    @Published var state: RepositorySnapshot? {
+        didSet {
+            if oldValue?.root != state?.root { configureRepositoryWatcher() }
+        }
+    }
     @Published var selectedPaths = Set<String>()
     @Published var focusedFile: String?
     @Published var sourcePreview: SourcePreview?
@@ -45,6 +49,7 @@ final class RepositoryModel: ObservableObject {
     private var diffTask: Task<Void, Never>?
     private var diffGeneration = UUID()
     private var graphTask: Task<Void, Never>?
+    private var graphDetailsTask: Task<Void, Never>?
     private var graphRoot: URL?
 
     var focusedChange: ChangedFile? { state?.files.first { $0.path == focusedFile } }
@@ -86,6 +91,91 @@ final class RepositoryModel: ObservableObject {
         }
     }
 
+    private var repositoryWatcher: RepositoryWatcher?
+    private var watcherSetup: Task<Void, Never>?
+    private var localRefreshTask: Task<Void, Never>?
+    private var localRefreshPending = false
+    private var metadataRefreshPending = false
+    private var localRefreshRunning = false
+
+    private var localRefreshBlocked: Bool {
+        busy || fileAction != nil || confirmation != nil || showClone || showBranch
+    }
+
+    private func configureRepositoryWatcher() {
+        repositoryWatcher = nil
+        watcherSetup?.cancel()
+        localRefreshTask?.cancel()
+        localRefreshPending = false
+        metadataRefreshPending = false
+        guard let root = state?.root else { return }
+        watcherSetup = Task { [weak self] in
+            guard let self else { return }
+            let metadata = (try? await git.watchMetadataRoots(root)) ?? [root.appendingPathComponent(".git")]
+            guard !Task.isCancelled, state?.root == root else { return }
+            repositoryWatcher = RepositoryWatcher(paths: [root] + metadata, metadataRoots: metadata) { [weak self] historyChanged in
+                Task { @MainActor [weak self] in
+                    guard let self, self.state?.root == root else { return }
+                    self.requestLocalRefresh(metadata: historyChanged)
+                }
+            }
+            // Cover changes between the initial snapshot and watcher startup.
+            requestLocalRefresh(metadata: true)
+        }
+    }
+
+    func refreshCommitLocalState() { requestLocalRefresh(metadata: true) }
+
+    private func requestLocalRefresh(metadata: Bool) {
+        guard state != nil else { return }
+        localRefreshPending = true
+        metadataRefreshPending = metadataRefreshPending || metadata
+        resumeLocalRefresh()
+    }
+
+    /// Debounce bursts; one pending pass survives active operations and dialogs.
+    func resumeLocalRefresh() {
+        guard localRefreshPending, !localRefreshBlocked, !localRefreshRunning else { return }
+        localRefreshTask?.cancel()
+        localRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+            guard let self, !Task.isCancelled, !localRefreshBlocked, let before = state else { return }
+            localRefreshRunning = true
+            localRefreshPending = false
+            let refreshHistory = metadataRefreshPending
+            metadataRefreshPending = false
+            defer {
+                localRefreshRunning = false
+                resumeLocalRefresh()
+            }
+            do {
+                let updated = try await git.snapshot(before.root)
+                guard !Task.isCancelled, state?.root == before.root else { return }
+                guard !localRefreshBlocked else {
+                    localRefreshPending = true
+                    metadataRefreshPending = metadataRefreshPending || refreshHistory
+                    return
+                }
+                let historyChanged = before.headOID != updated.headOID || before.branch != updated.branch ||
+                    before.localBranches != updated.localBranches || before.remoteBranches != updated.remoteBranches
+                selectedPaths.formIntersection(Set(updated.files.map(\.path)))
+                if updated != state { state = updated }
+                if !updated.files.contains(where: { $0.path == self.focusedFile }) { focusedFile = updated.files.first?.path }
+                // Status can remain M while content changes. Refresh the focused
+                // diff too, retaining the existing preview until a changed result arrives.
+                loadDiff(keepingPreview: true)
+                if refreshHistory || historyChanged {
+                    stashRevision = UUID()
+                    if graphRoot != nil { refreshGraph() }
+                }
+            } catch {
+                guard !Task.isCancelled, state?.root == before.root else { return }
+                // Keep the last snapshot on a transient failure and retry later
+                // on the next filesystem or activation event; avoid notification spam.
+            }
+        }
+    }
+
     func refresh(fetch: Bool = false) {
         guard let root = state?.root else { return }
         perform(fetch ? "正在获取远程状态…" : "正在刷新…") {
@@ -109,18 +199,21 @@ final class RepositoryModel: ObservableObject {
         if shouldRefreshGraph { refreshGraph() }
     }
 
-    func loadDiff() {
+    func loadDiff(keepingPreview: Bool = false) {
         diffTask?.cancel()
         let generation = UUID()
         diffGeneration = generation
-        sourcePreview = nil
-        guard let snapshot = state, let file = focusedChange else { loadingDiff = false; return }
-        loadingDiff = true
+        if !keepingPreview { sourcePreview = nil }
+        guard let snapshot = state, let file = focusedChange else { sourcePreview = nil; loadingDiff = false; return }
+        loadingDiff = !keepingPreview || sourcePreview == nil
         diffTask = Task {
             do {
-                let preview = try await git.sourcePreview(file, in: snapshot)
+                var preview = try await git.sourcePreview(file, in: snapshot)
                 guard !Task.isCancelled, diffGeneration == generation else { return }
-                sourcePreview = preview
+                if keepingPreview, let existing = sourcePreview { preview.id = existing.id }
+                if !keepingPreview || sourcePreview?.lines != preview.lines || sourcePreview?.notice != preview.notice {
+                    sourcePreview = preview
+                }
             } catch {
                 guard !Task.isCancelled, diffGeneration == generation else { return }
                 sourcePreview = .message("无法加载源文件：\(error.localizedDescription)")
@@ -384,11 +477,12 @@ final class RepositoryModel: ObservableObject {
     var selectedGraphCommit: GraphCommit? { graphCommits.first { $0.oid == selectedGraphCommitID } }
 
     func selectGraphCommit(_ commit: GraphCommit) {
+        graphDetailsTask?.cancel()
         selectedGraphCommitID = commit.oid
         graphFiles = []
         graphDetailsLoading = true
         guard let root = state?.root else { graphDetailsLoading = false; return }
-        graphTask = Task {
+        graphDetailsTask = Task {
             do {
                 let files = try await git.graphCommitFiles(commit.oid, root: root)
                 guard !Task.isCancelled, selectedGraphCommitID == commit.oid, state?.root == root else { return }
@@ -411,15 +505,20 @@ final class RepositoryModel: ObservableObject {
         graphTask?.cancel()
         graphLoading = true
         graphRoot = root
+        let previousSelection = selectedGraphCommitID
+        let limit = max(300, graphCommits.count)
         graphTask = Task {
             do {
-                let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: 300, offset: 0)
+                let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: limit, offset: 0)
                 guard !Task.isCancelled, graphRoot == root else { return }
                 graphCommits = page.commits
                 graphHasMore = page.hasMore
                 graphIsShallow = page.isShallow
                 graphCurrentUserEmail = page.currentUserEmail
-                if let first = page.commits.first { selectGraphCommit(first) }
+                if let selected = page.commits.first(where: { $0.oid == previousSelection }) {
+                    if selectedGraphCommitID != selected.oid { selectGraphCommit(selected) }
+                } else if let first = page.commits.first { selectGraphCommit(first) }
+                else { selectedGraphCommitID = nil; graphFiles = [] }
             } catch {
                 guard !Task.isCancelled else { return }
                 self.error = error.localizedDescription
@@ -450,6 +549,7 @@ final class RepositoryModel: ObservableObject {
 
     private func resetGraph() {
         graphTask?.cancel()
+        graphDetailsTask?.cancel()
         graphRoot = nil
         graphCurrentUserEmail = nil
         graphAuthor = nil
@@ -461,8 +561,52 @@ final class RepositoryModel: ObservableObject {
         graphDetailsLoading = false
     }
 
+    var canModifyGraphHistory: Bool {
+        !busy && !graphLoading && state?.hasHEAD == true && state?.detached == false &&
+        state?.operation == nil && state?.files.contains(where: \.isConflict) == false
+    }
+    var canApplyGraphCommit: Bool { canModifyGraphHistory && state?.files.isEmpty == true }
+
+    func requestGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit) {
+        guard canModifyGraphHistory, let expected = state else { return }
+        guard !action.needsCleanTree || canApplyGraphCommit else { return }
+        if case .undo = action, commit.oid != expected.headOID || commit.parents.isEmpty { return }
+        let parent = action.mainline.map { "\n以第 \($0) 个父提交为主线。" } ?? ""
+        confirmation = OperationConfirmation(title: "\(action.title)？",
+            message: "当前分支：\(expected.branch)\n目标：\(commit.shortOID) · \(commit.subject)\n\n\(action.explanation)\(parent)",
+            destructive: action.destructive) { [weak self] in
+                guard let self, self.state?.root == expected.root else { return }
+                self.perform("正在执行 \(action.title)…", recover: true) {
+                    try await self.git.applyGraphCommitAction(action, commit: commit, expected: expected)
+                    try await self.reload()
+                    self.notice = "\(action.title) 已完成"
+                }
+            }
+    }
+
+    func requestGraphSequence(abort: Bool) {
+        guard !busy, let expected = state, let operation = expected.operation,
+              ["挑选提交", "撤销提交"].contains(operation) else { return }
+        let verb = abort ? "中止" : "继续"
+        confirmation = OperationConfirmation(title: "\(verb)\(operation)？",
+            message: abort ? "恢复操作开始前的状态；本次冲突解决期间的改动将被丢弃。" : "使用已暂存的冲突解决结果继续\(operation)。请先确认所有冲突都已解决并暂存。",
+            destructive: abort) { [weak self] in
+                guard let self, self.state?.root == expected.root else { return }
+                self.perform("正在\(verb)\(operation)…", recover: true) {
+                    try await self.git.finishGraphSequence(abort: abort, expected: expected)
+                    try await self.reload()
+                    self.notice = "已\(verb)\(operation)"
+                }
+            }
+    }
+
     private func perform(_ label: String, recover: Bool = false, operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
+        if localRefreshRunning || localRefreshPending {
+            localRefreshTask?.cancel()
+            localRefreshPending = true
+            metadataRefreshPending = true
+        }
         busy = true
         activity = label
         notice = nil
@@ -474,6 +618,7 @@ final class RepositoryModel: ObservableObject {
             }
             busy = false
             activity = ""
+            resumeLocalRefresh()
         }
     }
 

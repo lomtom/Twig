@@ -26,7 +26,7 @@ struct ChangedFile: Identifiable, Hashable {
     var commitPaths: [String] { previousPath.map { [$0, path] } ?? [path] }
 }
 
-struct RepositorySnapshot {
+struct RepositorySnapshot: Equatable {
     let root: URL
     let branch: String
     let localBranches: [GitBranch]
@@ -103,6 +103,14 @@ actor GitService {
         return URL(fileURLWithPath: value.hasSuffix("\n") ? String(value.dropLast()) : value)
     }
 
+    func watchMetadataRoots(_ root: URL) throws -> [URL] {
+        try ["--git-dir", "--git-common-dir"].map { argument in
+            let path = try run(["rev-parse", "--path-format=absolute", argument], at: root)
+                .text.trimmingCharacters(in: .newlines)
+            return URL(fileURLWithPath: path)
+        }
+    }
+
     func snapshot(_ root: URL) throws -> RepositorySnapshot {
         let headResult = try run(["rev-parse", "--verify", "HEAD"], at: root, allowFailure: true)
         let head = headResult.code == 0
@@ -166,6 +174,61 @@ actor GitService {
             if FileManager.default.fileExists(atPath: location.path) { operation = label; break }
         }
         return RepositorySnapshot(root: root, branch: branch, localBranches: localBranches, remoteBranches: remoteBranches, files: files, ahead: ahead, behind: behind, upstream: upstream, remote: remote, headOID: headOID, hasHEAD: head, detached: symbolic.code != 0, operation: operation)
+    }
+
+    func applyGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit, expected: RepositorySnapshot) throws {
+        let current = try snapshot(expected.root)
+        guard current.branch == expected.branch, current.headOID == expected.headOID,
+              current.hasHEAD, !current.detached, current.operation == nil,
+              !current.files.contains(where: \.isConflict), current.files == expected.files else {
+            throw GitFailure(message: "仓库状态已改变，请刷新后重新确认操作。")
+        }
+        if action.needsCleanTree && !current.files.isEmpty {
+            throw GitFailure(message: "请先提交或暂存到 Stash，再执行此操作。")
+        }
+        // Full OIDs only; no user-provided revisions or shell interpolation.
+        guard [40, 64].contains(commit.oid.count), commit.oid.allSatisfy({ $0.isHexDigit }) else {
+            throw GitFailure(message: "无效的提交 ID。")
+        }
+        let oid = try run(["rev-parse", "--verify", commit.oid + "^{commit}"], at: expected.root).text.trimmingCharacters(in: .newlines)
+        let parentText = try run(["show", "-s", "--format=%P", oid], at: expected.root).text
+        let parents = parentText.split(whereSeparator: \.isWhitespace).map(String.init)
+        var args: [String]
+        switch action {
+        case let .reset(mode): args = ["reset", "--" + mode.rawValue, oid]
+        case .undo:
+            guard oid == current.headOID, let parent = parents.first else {
+                throw GitFailure(message: "Undo Commit 仅支持当前 HEAD，且提交必须有父提交。")
+            }
+            args = ["reset", "--soft", parent]
+        case .cherryPick, .revert:
+            if parents.count > 1 {
+                guard let mainline = action.mainline, (1...parents.count).contains(mainline) else {
+                    throw GitFailure(message: "合并提交必须选择有效的主线父提交。")
+                }
+            } else if action.mainline != nil {
+                throw GitFailure(message: "此提交不是合并提交，请重新选择操作。")
+            }
+            if case .cherryPick = action { args = ["cherry-pick", "--no-edit"] }
+            else { args = ["revert", "--no-edit"] }
+            if let parent = action.mainline { args += ["--mainline", String(parent)] }
+            args.append(oid)
+        }
+        try run(args, at: expected.root)
+    }
+
+    func finishGraphSequence(abort: Bool, expected: RepositorySnapshot) throws {
+        let current = try snapshot(expected.root)
+        guard current.branch == expected.branch, current.headOID == expected.headOID,
+              current.operation == expected.operation, let operation = current.operation,
+              ["挑选提交", "撤销提交"].contains(operation) else {
+            throw GitFailure(message: "进行中的操作已改变，请刷新后重试。")
+        }
+        if !abort && current.files.contains(where: \.isConflict) {
+            throw GitFailure(message: "请先解决并暂存所有冲突。")
+        }
+        let command = operation == "挑选提交" ? "cherry-pick" : "revert"
+        try run(["-c", "core.editor=true", command, abort ? "--abort" : "--continue"], at: expected.root)
     }
 
     func sourcePreview(_ file: ChangedFile, in state: RepositorySnapshot) throws -> SourcePreview {

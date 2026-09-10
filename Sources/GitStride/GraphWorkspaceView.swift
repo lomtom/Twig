@@ -136,6 +136,7 @@ struct GraphWorkspaceView: View {
                                                        matchesQuery: !searching || matchIDs.contains(row.id)) {
                                             model.selectGraphCommit(row.commit)
                                         }.id(row.id)
+                                            .contextMenu { GraphCommitContextMenu(commit: row.commit) }
                                     }
                                     if model.graphHasMore {
                                         Button(model.graphLoading ? "正在加载…" : "加载更早的提交") { model.loadMoreGraph() }

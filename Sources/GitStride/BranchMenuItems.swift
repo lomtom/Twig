@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct GitBranch: Identifiable {
+struct GitBranch: Identifiable, Equatable {
     let ref: String
     let name: String
     let remote: String?

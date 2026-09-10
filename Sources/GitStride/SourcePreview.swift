@@ -1,7 +1,7 @@
 import Foundation
 
-struct SourceLine: Identifiable {
-    enum Kind { case context, added, removed }
+struct SourceLine: Identifiable, Equatable {
+    enum Kind: Equatable { case context, added, removed }
     let id: Int
     let text: String
     let oldNumber: Int?
@@ -10,7 +10,7 @@ struct SourceLine: Identifiable {
 }
 
 struct SourcePreview {
-    let id = UUID()
+    var id = UUID()
     let lines: [SourceLine]
     let notice: String?
     var additions: Int { lines.filter { $0.kind == .added }.count }

@@ -3,6 +3,7 @@ import AppKit
 
 struct ContentView: View {
     @EnvironmentObject private var model: RepositoryModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var destination: WorkspaceDestination? = .commit
     @State private var commandPressed = false
 
@@ -76,6 +77,17 @@ struct ContentView: View {
         } message: { request in Text(request.message) }
         .sheet(isPresented: $model.showClone) { CloneSheet().environmentObject(model) }
         .sheet(isPresented: $model.showBranch) { BranchSheet().environmentObject(model) }
+        .onAppear {
+            if destination == .commit { model.refreshCommitLocalState() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            model.refreshCommitLocalState()
+        }
+        .onChange(of: model.confirmation?.id) { _, _ in model.resumeLocalRefresh() }
+        .onChange(of: model.fileAction?.id) { _, _ in model.resumeLocalRefresh() }
+        .onChange(of: model.showClone) { _, _ in model.resumeLocalRefresh() }
+        .onChange(of: model.showBranch) { _, _ in model.resumeLocalRefresh() }
         .onChange(of: model.focusedFile) { _, _ in model.loadDiff() }
     }
 

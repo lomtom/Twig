@@ -58,7 +58,10 @@ struct WorkspaceSidebar: View {
                 sectionTitle("工作区")
                     .padding(.top, 20)
                 ForEach(WorkspaceDestination.allCases) { destination in
-                    Button { selection = destination } label: {
+                    Button {
+                        selection = destination
+                        if destination == .commit { model.refreshCommitLocalState() }
+                    } label: {
                         SidebarMenuLabel(
                             title: destination.rawValue,
                             icon: destination.icon,

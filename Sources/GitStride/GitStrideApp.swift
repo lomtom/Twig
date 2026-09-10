@@ -4,7 +4,6 @@ import AppKit
 @main
 struct TwigApp: App {
     @StateObject private var model = RepositoryModel()
-    @Environment(\.scenePhase) private var scenePhase
 
     init() { NSApplication.shared.setActivationPolicy(.regular) }
 
@@ -14,9 +13,6 @@ struct TwigApp: App {
                 .frame(minWidth: 1040, minHeight: 640)
                 .background(WindowChromeConfigurator(isWelcome: model.state == nil).frame(width: 0, height: 0))
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .active && !model.busy { model.refresh() }
-                }
         }
         .defaultSize(width: 1200, height: 790)
         .commands {
