@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 struct GitBranch: Identifiable, Equatable {
     let ref: String
@@ -55,30 +54,5 @@ struct BranchTreeNode: Identifiable {
             if $0.children.isEmpty != $1.children.isEmpty { return !$0.children.isEmpty }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-    }
-}
-
-struct BranchMenuItems: View {
-    @EnvironmentObject private var model: RepositoryModel
-    let nodes: [BranchTreeNode]
-    let current: String
-
-    var body: some View {
-        ForEach(nodes) { node in
-            if !node.children.isEmpty {
-                Menu {
-                    if let branch = node.branch { branchButton(branch, title: node.name) }
-                    BranchMenuItems(nodes: node.children, current: current)
-                } label: { Label(node.name, systemImage: "folder") }
-            } else if let branch = node.branch {
-                branchButton(branch, title: node.name)
-            }
-        }
-    }
-
-    private func branchButton(_ branch: GitBranch, title: String) -> some View {
-        Button { model.selectBranch(branch) } label: {
-            Label(title, systemImage: !branch.isRemote && branch.name == current ? "checkmark" : "arrow.triangle.branch")
-        }.help(branch.name)
     }
 }

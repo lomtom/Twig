@@ -89,7 +89,13 @@ struct StashWorkspaceView: View {
                 } else if files.isEmpty {
                     Text("无文件").font(.caption).foregroundStyle(.tertiary).padding(.horizontal, 18)
                 } else {
-                    StashFileTreeView(files: files, focusedFileID: $focusedFileID)
+                    PreviewFileTreeView(
+                        files: files.map(\.change),
+                        focusedFileID: Binding(
+                            get: { files.first { $0.id == focusedFileID }?.change.path },
+                            set: { path in focusedFileID = files.first { $0.change.path == path }?.id }
+                        )
+                    )
                 }
             }.frame(maxHeight: .infinity)
                 .dashboardPanel()

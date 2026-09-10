@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-struct ContentView: View {
+struct MainWorkspaceView: View {
     @EnvironmentObject private var model: RepositoryModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: WorkspaceDestination? = .commit

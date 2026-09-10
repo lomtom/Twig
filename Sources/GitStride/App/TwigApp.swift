@@ -9,7 +9,7 @@ struct TwigApp: App {
 
     var body: some Scene {
         Window("Twig", id: "main") {
-            ContentView().environmentObject(model)
+            MainWorkspaceView().environmentObject(model)
                 .frame(minWidth: 1040, minHeight: 640)
                 .background(WindowChromeConfigurator(isWelcome: model.state == nil && !model.isRestoringLastRepository).frame(width: 0, height: 0))
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }

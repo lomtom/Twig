@@ -295,7 +295,7 @@ struct GraphWorkspaceView: View {
                 Text("无变更文件").font(.caption).foregroundStyle(.tertiary).padding(16)
                 Spacer()
             } else {
-                GraphFileTreeView(files: model.graphFiles, focusedFileID: $focusedFileID)
+                PreviewFileTreeView(files: model.graphFiles.map(\.change), focusedFileID: $focusedFileID)
                     .id(model.selectedGraphCommitID)
             }
         }
