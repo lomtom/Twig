@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var destination: WorkspaceDestination? = .commit
     @State private var commandPressed = false
 
-    var body: some View {
+    private var mainContent: some View {
         Group {
             if let state = model.state { workspace(state) }
             else { welcome }
@@ -70,6 +70,13 @@ struct ContentView: View {
         }
         .toolbarBackground(.hidden, for: .windowToolbar)
         .toolbar(model.state == nil ? .hidden : .automatic, for: .windowToolbar)
+    }
+
+    private var presentedContent: some View {
+        mainContent
+        .sheet(item: $model.graphAction) { request in GraphActionSheet(request: request).environmentObject(model) }
+        .sheet(item: $model.pushReview) { request in PushReviewSheet(request: request).environmentObject(model) }
+        .sheet(item: $model.conflictRequest) { request in ConflictResolutionSheet(request: request).environmentObject(model) }
         .sheet(item: $model.fileAction) { request in FileActionSheet(request: request).environmentObject(model) }
         .alert(model.confirmation?.title ?? "确认操作", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.confirmation = nil } }), presenting: model.confirmation) { request in
             Button("取消", role: .cancel) { model.confirmation = nil }
@@ -77,18 +84,29 @@ struct ContentView: View {
         } message: { request in Text(request.message) }
         .sheet(isPresented: $model.showClone) { CloneSheet().environmentObject(model) }
         .sheet(isPresented: $model.showBranch) { BranchSheet().environmentObject(model) }
+    }
+
+    var body: some View {
+        presentedContent
         .onAppear {
+            model.restoreLastRepository()
             if destination == .commit { model.refreshCommitLocalState() }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             model.refreshCommitLocalState()
         }
+        .onChange(of: model.requestedDestination) { _, value in
+            if let value { destination = value; model.requestedDestination = nil }
+        }
+        .onChange(of: model.graphAction?.id) { _, _ in model.resumeLocalRefresh() }
+        .onChange(of: model.pushReview?.id) { _, _ in model.resumeLocalRefresh() }
+        .onChange(of: model.conflictRequest?.id) { _, _ in model.resumeLocalRefresh() }
         .onChange(of: model.confirmation?.id) { _, _ in model.resumeLocalRefresh() }
         .onChange(of: model.fileAction?.id) { _, _ in model.resumeLocalRefresh() }
         .onChange(of: model.showClone) { _, _ in model.resumeLocalRefresh() }
         .onChange(of: model.showBranch) { _, _ in model.resumeLocalRefresh() }
-        .onChange(of: model.focusedFile) { _, _ in model.loadDiff() }
+        .onChange(of: model.focusedFile) { _, _ in model.loadDiff(keepingPreview: true) }
     }
 
     private var welcome: some View {
@@ -228,10 +246,8 @@ struct ContentView: View {
 
     private func commitWorkspace(_ state: RepositorySnapshot) -> some View {
         VStack(spacing: 0) {
-            if let operation = state.operation {
-                warning("仓库正在进行\(operation)。请在终端完成或取消后刷新。")
-            } else if state.files.contains(where: \.isConflict) {
-                warning("存在冲突文件。请在终端或编辑器中解决冲突后刷新。")
+            if state.operation != nil || state.files.contains(where: \.isConflict) {
+                ConflictOperationBanner(state: state)
             } else if state.detached {
                 warning("当前处于游离 HEAD。请先创建或切换到一个分支，再提交和同步。")
             }
@@ -275,11 +291,13 @@ struct ContentView: View {
             }.buttonStyle(.borderless).font(.system(size: 13, weight: .medium))
                 .padding(.horizontal, 14).frame(height: 48)
                 .dashboardPanel(fill: GitStrideStyle.panelHeader)
-            ScrollView {
-                VStack(spacing: 4) {
-                    fileSection("改动的文件", files: state.files.filter { !$0.isUntracked }, state: state)
-                    fileSection("非版本控制文件", files: state.files.filter(\.isUntracked), state: state)
-                }.padding(.vertical, 8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 4) {
+                        fileSection("改动的文件", files: state.files.filter { !$0.isUntracked }, state: state)
+                        fileSection("非版本控制文件", files: state.files.filter(\.isUntracked), state: state)
+                    }.padding(.vertical, 8)
+                }.onChange(of: model.focusedFile) { _, path in if let path { proxy.scrollTo(path) } }
             }.dashboardPanel()
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
@@ -349,10 +367,18 @@ struct ContentView: View {
     }
 
     @ViewBuilder private func sourceContent(_ file: ChangedFile) -> some View {
-        if model.loadingDiff {
-            ProgressView("正在读取源文件…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        if file.isConflict {
+            VStack(spacing: 16) {
+                Image(systemName: "arrow.triangle.merge").font(.largeTitle).foregroundStyle(.orange)
+                Text(file.path).font(.headline)
+                Text("比较两侧内容，编辑合并结果后标记为已解决。").foregroundStyle(.secondary)
+                Button("解决冲突…") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let preview = model.sourcePreview {
-            SourceFileView(preview: preview, file: file).id(preview.id)
+            SourceFileView(preview: preview, file: file, moveFile: model.moveFocusedFile)
+                .overlay(alignment: .topTrailing) { if model.loadingDiff { ProgressView().controlSize(.small).padding(14) } }
+        } else if model.loadingDiff {
+            ProgressView("正在读取源文件…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView("无法显示源文件", systemImage: "doc.text")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

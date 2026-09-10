@@ -22,6 +22,19 @@ final class RepositoryModel: ObservableObject {
     @Published var showBranch = false
     @Published var fileAction: FileActionRequest?
     @Published var confirmation: OperationConfirmation?
+    @Published var graphAction: GraphActionRequest?
+    @Published var pushReview: PushReviewRequest?
+    @Published var conflictRequest: ConflictRequest?
+    @Published var requestedDestination: WorkspaceDestination?
+    private var restoredLastRepository = false
+
+    func restoreLastRepository() {
+        guard !restoredLastRepository else { return }
+        restoredLastRepository = true
+        guard state == nil, let path = UserDefaults.standard.string(forKey: "lastRepository") ?? recent.first else { return }
+        if FileManager.default.fileExists(atPath: path) { open(URL(fileURLWithPath: path)) }
+    }
+
     @Published var stashRevision = UUID()
     @Published var treeExpansion: (id: UUID, expand: Bool) = (UUID(), true)
     @Published var graphCommits: [GraphCommit] = [] {
@@ -48,6 +61,7 @@ final class RepositoryModel: ObservableObject {
     let git = GitService()
     private var diffTask: Task<Void, Never>?
     private var diffGeneration = UUID()
+    private var previewFilePath: String?
     private var graphTask: Task<Void, Never>?
     private var graphDetailsTask: Task<Void, Never>?
     private var graphRoot: URL?
@@ -87,6 +101,7 @@ final class RepositoryModel: ObservableObject {
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
             UserDefaults.standard.set(self.recent, forKey: "recentRepositories")
+            UserDefaults.standard.set(root.path, forKey: "lastRepository")
             self.loadDiff()
         }
     }
@@ -99,7 +114,7 @@ final class RepositoryModel: ObservableObject {
     private var localRefreshRunning = false
 
     private var localRefreshBlocked: Bool {
-        busy || fileAction != nil || confirmation != nil || showClone || showBranch
+        busy || fileAction != nil || confirmation != nil || graphAction != nil || pushReview != nil || conflictRequest != nil || showClone || showBranch
     }
 
     private func configureRepositoryWatcher() {
@@ -210,10 +225,11 @@ final class RepositoryModel: ObservableObject {
             do {
                 var preview = try await git.sourcePreview(file, in: snapshot)
                 guard !Task.isCancelled, diffGeneration == generation else { return }
-                if keepingPreview, let existing = sourcePreview { preview.id = existing.id }
-                if !keepingPreview || sourcePreview?.lines != preview.lines || sourcePreview?.notice != preview.notice {
+                if keepingPreview, previewFilePath == file.path, let existing = sourcePreview { preview.id = existing.id }
+                if !keepingPreview || previewFilePath != file.path || sourcePreview?.lines != preview.lines || sourcePreview?.notice != preview.notice {
                     sourcePreview = preview
                 }
+                previewFilePath = file.path
             } catch {
                 guard !Task.isCancelled, diffGeneration == generation else { return }
                 sourcePreview = .message("无法加载源文件：\(error.localizedDescription)")
@@ -253,34 +269,35 @@ final class RepositoryModel: ObservableObject {
 
     func commitAndPush() {
         guard canCommitAndPush, let state else { return }
-        let files = selectedFiles
-        let paths = Array(Set(files.flatMap(\.commitPaths))).sorted()
-        let commitMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let destination = state.upstream ?? (state.remote ?? "远程") + "/" + state.branch
-        confirmation = OperationConfirmation(title: "确认提交并推送？", message: "将所选 \(files.count) 个文件提交到“\(state.branch)”，然后推送到“\(destination)”。此分支已有的未推送提交也会一起推送。") { [weak self] in
-            guard let self, !self.busy else { return }
-            guard self.state?.root == state.root else { self.error = "仓库已切换，请重新确认。"; return }
-            self.perform("正在提交…", recover: true) {
-                let current = try await self.git.snapshot(state.root)
-                guard current.branch == state.branch, current.headOID == state.headOID,
-                      current.upstream == state.upstream, current.remote == state.remote else {
-                    throw GitFailure(message: "仓库或分支状态已变化，请重新确认提交并推送。")
-                }
-                try await self.git.commit(paths: paths, message: commitMessage, root: state.root)
+        let paths = Array(Set(selectedFiles.flatMap(\.commitPaths))).sorted()
+        pushReview = PushReviewRequest(expected: state, message: message.trimmingCharacters(in: .whitespacesAndNewlines), paths: paths)
+    }
+
+    func executePushReview(_ request: PushReviewRequest) {
+        let expected = request.expected
+        guard !busy, state?.root == expected.root else { return }
+        perform(request.message == nil ? "正在推送…" : "正在提交…", recover: true) {
+            let current = try await self.git.snapshot(expected.root)
+            guard current.branch == expected.branch, current.headOID == expected.headOID,
+                  current.upstream == expected.upstream, current.remote == expected.remote else {
+                throw GitFailure(message: "分支状态已变化，请重新查看待推送提交。")
+            }
+            if let message = request.message {
+                try await self.git.commit(paths: request.paths, message: message, root: expected.root)
                 self.message = ""
                 do {
-                    let committed = try await self.git.snapshot(state.root)
-                    guard committed.branch == state.branch, committed.upstream == state.upstream, committed.remote == state.remote else {
-                        throw GitFailure(message: "提交后分支或远程配置发生变化，请刷新后单独推送。")
+                    let committed = try await self.git.snapshot(expected.root)
+                    guard committed.branch == expected.branch, committed.upstream == expected.upstream, committed.remote == expected.remote else {
+                        throw GitFailure(message: "提交后分支配置发生变化，请重新确认推送。")
                     }
                     self.activity = "正在推送…"
                     try await self.git.push(state: committed)
                 } catch {
-                    throw GitFailure(message: "本地提交已完成，但推送未完成。提交已保留，请处理以下问题后单独推送，无需再次提交。\n\n\(error.localizedDescription)")
+                    throw GitFailure(message: "本地提交已完成，但推送未完成。请处理后单独推送，无需再次提交。\n\n\(error.localizedDescription)")
                 }
-                try await self.reload()
-                self.notice = "已提交并推送"
-            }
+            } else { try await self.git.push(state: expected) }
+            try await self.reload()
+            self.notice = request.message == nil ? "推送完成" : "已提交并推送"
         }
     }
 
@@ -302,18 +319,7 @@ final class RepositoryModel: ObservableObject {
 
     func push() {
         guard canSync, let state else { return }
-        confirmation = OperationConfirmation(title: "确认推送？", message: "将分支“\(state.branch)”的提交推送到“\(state.upstream ?? (state.remote ?? "远程") + "/" + state.branch)”。") { [weak self] in
-            guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.upstream == state.upstream, self.state?.remote == state.remote, self.state?.headOID == state.headOID else { return }
-            self.executePush() }
-    }
-
-    private func executePush() {
-        guard canSync, let state else { return }
-        perform("正在推送…", recover: true) {
-            try await self.git.push(state: state)
-            try await self.reload()
-            self.notice = "推送完成"
-        }
+        pushReview = PushReviewRequest(expected: state)
     }
 
     func switchBranch(_ name: String, create: Bool = false, confirmed: Bool = false) {
@@ -345,9 +351,9 @@ final class RepositoryModel: ObservableObject {
     }
 
     func createBranch(from branch: GitBranch, named name: String) {
-        guard !busy, !branch.isRemote, let state, state.operation == nil else { return }
+        guard !busy, let state, state.operation == nil else { return }
         perform("正在创建分支…", recover: true) {
-            try await self.git.createBranch(name, from: branch.name, root: state.root)
+            try await self.git.createBranch(name, from: branch.ref, root: state.root)
             try await self.reload()
             self.notice = "当前分支：\(name)"
         }
@@ -363,11 +369,12 @@ final class RepositoryModel: ObservableObject {
     }
 
     func deleteBranch(_ branch: GitBranch) {
-        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
-        confirmation = OperationConfirmation(title: "删除分支？", message: "将删除本地分支“\(branch.name)”。Git 会阻止删除尚未合并的分支。", destructive: true) { [weak self] in
-            guard let self else { return }
+        guard !busy, let state, state.operation == nil, branch.isRemote || branch.name != state.branch else { return }
+        confirmation = OperationConfirmation(title: "删除分支？", message: branch.isRemote ? "将从远程服务器删除分支“\(branch.name)”，影响所有协作者。本地分支保留；若远程已有新提交，删除会被拒绝。" : "将删除本地分支“\(branch.name)”。Git 会阻止删除尚未合并的分支。", destructive: true) { [weak self] in
+            guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.headOID == state.headOID else { return }
             self.perform("正在删除分支…", recover: true) {
-                try await self.git.deleteBranch(branch.name, root: state.root)
+                if branch.isRemote { try await self.git.deleteRemoteBranch(branch, root: state.root) }
+                else { try await self.git.deleteBranch(branch.name, root: state.root) }
                 try await self.reload()
                 self.notice = "已删除分支：\(branch.name)"
             }
@@ -375,11 +382,11 @@ final class RepositoryModel: ObservableObject {
     }
 
     func rebaseCurrentBranch(onto branch: GitBranch) {
-        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
+        guard !busy, let state, state.operation == nil, branch.isRemote || branch.name != state.branch else { return }
         confirmation = OperationConfirmation(title: "变基当前分支？", message: "将当前分支“\(state.branch)”变基到“\(branch.name)”之上。发生冲突时需手动解决后继续。") { [weak self] in
-            guard let self else { return }
+            guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.headOID == state.headOID else { return }
             self.perform("正在变基…", recover: true) {
-                try await self.git.rebaseCurrentBranch(onto: branch.name, root: state.root)
+                try await self.git.rebaseCurrentBranch(onto: branch.ref, root: state.root)
                 try await self.reload()
                 self.notice = "已将“\(state.branch)”变基到“\(branch.name)”"
             }
@@ -387,11 +394,11 @@ final class RepositoryModel: ObservableObject {
     }
 
     func mergeBranchIntoCurrent(_ branch: GitBranch) {
-        guard !busy, !branch.isRemote, let state, state.operation == nil, branch.name != state.branch else { return }
+        guard !busy, let state, state.operation == nil, branch.isRemote || branch.name != state.branch else { return }
         confirmation = OperationConfirmation(title: "合并分支？", message: "将“\(branch.name)”合并到当前分支“\(state.branch)”。发生冲突时需手动解决后继续。") { [weak self] in
-            guard let self else { return }
+            guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.headOID == state.headOID else { return }
             self.perform("正在合并…", recover: true) {
-                try await self.git.mergeIntoCurrentBranch(branch.name, root: state.root)
+                try await self.git.mergeIntoCurrentBranch(branch.ref, root: state.root)
                 try await self.reload()
                 self.notice = "已将“\(branch.name)”合并到“\(state.branch)”"
             }
@@ -441,6 +448,7 @@ final class RepositoryModel: ObservableObject {
                 try await self.git.modifyStash(entry, action: action, expected: state)
                 try await self.reload()
                 self.notice = "Stash 已\(action.title)"
+                if action != .drop { self.requestedDestination = .commit }
             }
         }
     }
@@ -458,6 +466,7 @@ final class RepositoryModel: ObservableObject {
             self.recent.insert(root.path, at: 0)
             self.recent = Array(self.recent.prefix(8))
             UserDefaults.standard.set(self.recent, forKey: "recentRepositories")
+            UserDefaults.standard.set(root.path, forKey: "lastRepository")
             self.loadDiff()
             self.notice = "仓库已克隆"
         }
@@ -505,12 +514,12 @@ final class RepositoryModel: ObservableObject {
         graphTask?.cancel()
         graphLoading = true
         graphRoot = root
-        let previousSelection = selectedGraphCommitID
         let limit = max(300, graphCommits.count)
         graphTask = Task {
             do {
                 let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: limit, offset: 0)
                 guard !Task.isCancelled, graphRoot == root else { return }
+                let previousSelection = selectedGraphCommitID
                 graphCommits = page.commits
                 graphHasMore = page.hasMore
                 graphIsShallow = page.isShallow
@@ -531,7 +540,7 @@ final class RepositoryModel: ObservableObject {
         guard let root = state?.root, graphRoot == root, graphHasMore, !graphLoading else { return }
         graphLoading = true
         let offset = graphCommits.count
-        Task {
+        graphTask = Task {
             do {
                 let page = try await git.graphLog(root: root, scope: graphScope, sort: graphSort, limit: 300, offset: offset)
                 guard !Task.isCancelled, graphRoot == root else { return }
@@ -551,6 +560,7 @@ final class RepositoryModel: ObservableObject {
         graphTask?.cancel()
         graphDetailsTask?.cancel()
         graphRoot = nil
+        graphLoading = false
         graphCurrentUserEmail = nil
         graphAuthor = nil
         graphCommits = []
@@ -565,28 +575,26 @@ final class RepositoryModel: ObservableObject {
         !busy && !graphLoading && state?.hasHEAD == true && state?.detached == false &&
         state?.operation == nil && state?.files.contains(where: \.isConflict) == false
     }
-    var canApplyGraphCommit: Bool { canModifyGraphHistory && state?.files.isEmpty == true }
+    var canApplyGraphCommit: Bool { canModifyGraphHistory }
 
     func requestGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit) {
         guard canModifyGraphHistory, let expected = state else { return }
-        guard !action.needsCleanTree || canApplyGraphCommit else { return }
         if case .undo = action, commit.oid != expected.headOID || commit.parents.isEmpty { return }
-        let parent = action.mainline.map { "\n以第 \($0) 个父提交为主线。" } ?? ""
-        confirmation = OperationConfirmation(title: "\(action.title)？",
-            message: "当前分支：\(expected.branch)\n目标：\(commit.shortOID) · \(commit.subject)\n\n\(action.explanation)\(parent)",
-            destructive: action.destructive) { [weak self] in
-                guard let self, self.state?.root == expected.root else { return }
-                self.perform("正在执行 \(action.title)…", recover: true) {
-                    try await self.git.applyGraphCommitAction(action, commit: commit, expected: expected)
-                    try await self.reload()
-                    self.notice = "\(action.title) 已完成"
-                }
-            }
+        graphAction = GraphActionRequest(action: action, commit: commit, expected: expected)
+    }
+
+    func executeGraphCommitAction(_ request: GraphActionRequest, action: GraphCommitAction, stashChanges: Bool) {
+        guard state?.root == request.expected.root else { return }
+        perform("正在执行 \(action.title)…", recover: true) {
+            try await self.git.applyGraphCommitAction(action, commit: request.commit, expected: request.expected, stashChanges: stashChanges)
+            try await self.reload()
+            self.notice = "\(action.title) 已完成" + (stashChanges ? "；原有改动已保存在 Stash" : "")
+        }
     }
 
     func requestGraphSequence(abort: Bool) {
         guard !busy, let expected = state, let operation = expected.operation,
-              ["挑选提交", "撤销提交"].contains(operation) else { return }
+              ["合并", "变基", "挑选提交", "撤销提交"].contains(operation) else { return }
         let verb = abort ? "中止" : "继续"
         confirmation = OperationConfirmation(title: "\(verb)\(operation)？",
             message: abort ? "恢复操作开始前的状态；本次冲突解决期间的改动将被丢弃。" : "使用已暂存的冲突解决结果继续\(operation)。请先确认所有冲突都已解决并暂存。",
@@ -600,6 +608,49 @@ final class RepositoryModel: ObservableObject {
             }
     }
 
+    func moveFocusedFile(_ step: Int) {
+        guard let state else { return }
+        let ordered = ChangeTreeNode.build(state.files.filter { !$0.isUntracked }).flatMap(\.files) +
+            ChangeTreeNode.build(state.files.filter(\.isUntracked)).flatMap(\.files)
+        guard !ordered.isEmpty else { return }
+        let index = ordered.firstIndex { $0.path == focusedFile } ?? (step > 0 ? -1 : ordered.count)
+        focusedFile = ordered[min(max(index + step, 0), ordered.count - 1)].path
+    }
+
+    func openConflict(_ file: ChangedFile) {
+        guard !busy, file.isConflict, let state else { return }
+        conflictRequest = ConflictRequest(expected: state, file: file)
+    }
+
+    func resolveConflict(_ document: ConflictDocument, resolution: ConflictResolution) async throws {
+        guard !busy, state?.root == document.request.expected.root else { throw GitFailure(message: "仓库正在忙或已经切换。") }
+        localRefreshTask?.cancel()
+        busy = true; activity = "正在保存冲突解决结果…"; error = nil
+        defer { busy = false; activity = ""; resumeLocalRefresh() }
+        do {
+            try await git.resolveConflict(document, resolution: resolution)
+            try await reload()
+            focusedFile = state?.files.first(where: \.isConflict)?.path ?? focusedFile
+            notice = "已解决并暂存：" + document.request.file.path
+        } catch {
+            try? await reload()
+            throw error
+        }
+    }
+
+    func requestSkipSequence() {
+        guard !busy, let expected = state, let operation = expected.operation,
+              ["变基", "挑选提交"].contains(operation) else { return }
+        confirmation = OperationConfirmation(title: "跳过当前提交？", message: "当前提交的改动和冲突解决结果会被丢弃，继续处理下一个提交。", destructive: true) { [weak self] in
+            guard let self, self.state?.root == expected.root else { return }
+            self.perform("正在跳过提交…", recover: true) {
+                try await self.git.finishGraphSequence(abort: false, expected: expected, skip: true)
+                try await self.reload()
+                self.notice = "已跳过当前提交"
+            }
+        }
+    }
+
     private func perform(_ label: String, recover: Bool = false, operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
         if localRefreshRunning || localRefreshPending {
@@ -610,11 +661,18 @@ final class RepositoryModel: ObservableObject {
         busy = true
         activity = label
         notice = nil
+        error = nil
         Task {
             do { try await operation() }
             catch {
                 self.error = error.localizedDescription
-                if recover { try? await self.reload() }
+                if recover {
+                    try? await self.reload()
+                    if self.state?.files.contains(where: \.isConflict) == true || self.state?.operation != nil {
+                        self.focusedFile = self.state?.files.first(where: \.isConflict)?.path ?? self.focusedFile
+                        self.requestedDestination = .commit
+                    }
+                }
             }
             busy = false
             activity = ""

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct GitBranch: Identifiable, Equatable {
     let ref: String
+    let oid: String
     let name: String
     let remote: String?
     let upstream: String

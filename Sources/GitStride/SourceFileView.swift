@@ -3,6 +3,7 @@ import SwiftUI
 struct SourceFileView: View {
     let preview: SourcePreview
     let file: ChangedFile
+    var moveFile: ((Int) -> Void)? = nil
     @State private var changeIndex = 0
     @State private var targetLine: Int?
     @State private var navigationID = UUID()
@@ -44,13 +45,16 @@ struct SourceFileView: View {
             if preview.lines.isEmpty {
                 ContentUnavailableView("没有可显示的源代码", systemImage: "doc.text").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                SourceCodeScrollView(preview: preview, targetLine: targetLine, navigationID: navigationID)
+                SourceCodeScrollView(preview: preview, targetLine: targetLine, navigationID: navigationID, moveFile: moveFile)
             }
-        }.onAppear {
-            changeIndex = 0
-            targetLine = changes.first
-            navigationID = UUID()
-        }
+        }.onAppear { resetNavigation() }
+            .onChange(of: preview.id) { _, _ in resetNavigation() }
+    }
+
+    private func resetNavigation() {
+        changeIndex = 0
+        targetLine = changes.first
+        navigationID = UUID()
     }
 
     private func navigate(_ direction: Int) {

@@ -46,6 +46,9 @@ struct GraphChangedFile: Identifiable, Hashable {
     let path: String
     let previousPath: String?
     var id: String { path }
+    var change: ChangedFile {
+        ChangedFile(path: path, previousPath: previousPath, index: status.first ?? "M", worktree: " ")
+    }
     var label: String {
         switch status.first {
         case "A": return "新增"

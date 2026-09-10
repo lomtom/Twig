@@ -6,6 +6,7 @@ struct ChangeTreeView: View {
     let nodes: [ChangeTreeNode]
     let state: RepositorySnapshot
     @State private var collapsed = Set<String>()
+    @FocusState private var keyboardFocused: Bool
 
     private struct Row: Identifiable {
         let node: ChangeTreeNode
@@ -25,13 +26,23 @@ struct ChangeTreeView: View {
     var body: some View {
         LazyVStack(spacing: 0) {
                 ForEach(rows) { row in
-                    if let file = row.node.file { fileRow(file, depth: row.depth) }
+                    if let file = row.node.file { fileRow(file, depth: row.depth).id(file.path) }
                     else { directoryRow(row.node, depth: row.depth) }
                 }
         }.padding(.horizontal, 8)
+            .focusable().focusEffectDisabled().focused($keyboardFocused)
+            .onKeyPress(.upArrow) { move(-1); return .handled }
+            .onKeyPress(.downArrow) { move(1); return .handled }
             .onChange(of: model.treeExpansion.id) { _, _ in
                 collapsed = model.treeExpansion.expand ? [] : directoryPaths(nodes)
             }
+    }
+
+    private func move(_ step: Int) {
+        let visible = rows.compactMap { $0.node.file }
+        guard !visible.isEmpty else { return }
+        let index = visible.firstIndex { $0.path == model.focusedFile } ?? (step > 0 ? -1 : visible.count)
+        model.focusedFile = visible[min(max(index + step, 0), visible.count - 1)].path
     }
 
     private func directoryPaths(_ nodes: [ChangeTreeNode]) -> Set<String> {
@@ -45,13 +56,8 @@ struct ChangeTreeView: View {
         let discardableFiles = files.filter { !$0.isUntracked && $0.index != "A" && !$0.isConflict }
         let selected = paths.intersection(model.selectedPaths).count
         let isCollapsed = collapsed.contains(node.path)
-        return HStack(spacing: 7) {
-            Button { toggleDirectory(node.path) } label: {
-                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .semibold)).frame(width: 12, height: 18)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(isCollapsed ? "展开" : "折叠") \(node.name)")
+        return FileTreeFolderRow(name: node.name, path: node.path, depth: depth, count: paths.count,
+                                 collapsed: isCollapsed, toggle: { toggleDirectory(node.path) }) {
             Toggle("选择目录 \(node.path)", sources: node.files.map { file in
                 Binding<Bool>(get: { model.selectedPaths.contains(file.path) }, set: { isSelected in
                     if isSelected { model.selectedPaths.insert(file.path) }
@@ -60,14 +66,7 @@ struct ChangeTreeView: View {
             }, isOn: \.self)
                 .toggleStyle(.checkbox).labelsHidden().disabled(model.busy)
                 .accessibilityLabel("选择目录 \(node.path)，已选 \(selected) 个文件")
-            Image(systemName: isCollapsed ? "folder.fill" : "folder").foregroundStyle(GitStrideStyle.accent)
-            Text(node.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
-            Spacer(minLength: 2)
-            CountBadge(value: paths.count)
-        }.padding(.leading, CGFloat(depth) * 14 + 5).padding(.trailing, 9).padding(.vertical, 1)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { toggleDirectory(node.path) }
-            .help(node.path)
+        }
             .contextMenu {
                 if isUntrackedDirectory {
                     Button("添加到 Git") { model.addToGit(files) }
@@ -91,17 +90,21 @@ struct ChangeTreeView: View {
                 .foregroundStyle(file.isConflict ? Color.orange : Color.secondary)
             Text((file.path as NSString).lastPathComponent)
                 .font(.system(size: 12))
-                .foregroundStyle(fileNameColor(file))
+                .foregroundStyle(file.treeColor)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 2)
         }.padding(.leading, CGFloat(depth) * 14 + 5).padding(.trailing, 9).padding(.vertical, 3)
             .background(model.focusedFile == file.path ? GitStrideStyle.selection : Color.clear,
                         in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(Rectangle()).onTapGesture { model.focusedFile = file.path }
+            .contentShape(Rectangle()).onTapGesture { model.focusedFile = file.path; keyboardFocused = true }
             .help(file.path)
             .accessibilityElement(children: .contain).accessibilityAction(named: "查看源文件") { model.focusedFile = file.path }
             .contextMenu {
+                if file.isConflict {
+                    Button("解决冲突…") { model.openConflict(file) }.disabled(model.busy)
+                    Divider()
+                }
                 if file.isUntracked {
                     Button("添加到 Git") { model.addToGit(file) }
                         .disabled(model.busy || state.operation != nil)
@@ -112,17 +115,6 @@ struct ChangeTreeView: View {
                     Button("丢弃文件改动…", role: .destructive) { model.requestFileAction(.rollback, files: [file]) }.disabled(model.busy)
                 }
             }
-    }
-
-    private func fileNameColor(_ file: ChangedFile) -> Color {
-        if file.isUntracked { return GitStrideStyle.unversioned }
-        if file.isConflict { return .orange }
-        switch file.status {
-        case "新增": return GitStrideStyle.added
-        case "删除": return .red
-        case "修改": return GitStrideStyle.modified
-        default: return .secondary
-        }
     }
 
     private func toggleDirectory(_ path: String) {

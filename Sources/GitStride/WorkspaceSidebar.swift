@@ -281,6 +281,8 @@ private struct BranchSwitcher: View {
         .buttonStyle(SwitcherButtonStyle())
         .padding(8)
         .frame(width: 380)
+        .onAppear { expandCurrentBranch() }
+        .onChange(of: model.state?.branch) { _, _ in expandCurrentBranch() }
         .sheet(item: $branchEditor) { editor in
             switch editor {
             case let .rename(branch):
@@ -291,6 +293,18 @@ private struct BranchSwitcher: View {
                 BranchNameSheet(title: "新建分支", placeholder: "分支名称", confirmTitle: "创建并切换") { name in
                     model.createBranch(from: branch, named: name)
                 }
+            }
+        }
+    }
+
+    private func expandCurrentBranch() {
+        guard let state = model.state else { return }
+        let upstream = state.localBranches.first { $0.name == state.branch }?.upstreamName
+        for (prefix, name) in [("local", Optional(state.branch)), ("remote", upstream)] {
+            guard let name else { continue }
+            let parts = name.split(separator: "/")
+            for count in 1..<max(1, parts.count) {
+                expandedGroups.insert(prefix + ":" + parts.prefix(count).joined(separator: "/"))
             }
         }
     }
@@ -393,18 +407,16 @@ private struct BranchSwitcherRows: View {
         Menu {
             Button("Checkout \(branch.name)") { action(branch, .checkout) }
                 .disabled((!branch.isRemote && branch.name == current) || (branch.isRemote && branch.ref == currentUpstream))
-            if !branch.isRemote {
-                Divider()
-                Button("Delete", role: .destructive) { action(branch, .delete) }
-                    .disabled(branch.name == current)
-                Button("Rename…") { action(branch, .rename) }
-                Button("New Branch…") { action(branch, .newBranch) }
-                Divider()
-                Button("Rebase \(current) onto \(branch.name)") { action(branch, .rebaseOnto) }
-                    .disabled(branch.name == current)
-                Button("Merge \(branch.name) into \(current)") { action(branch, .mergeInto) }
-                    .disabled(branch.name == current)
-            }
+            Divider()
+            Button("Delete", role: .destructive) { action(branch, .delete) }
+                .disabled(!branch.isRemote && branch.name == current)
+            if !branch.isRemote { Button("Rename…") { action(branch, .rename) } }
+            Button("New Branch…") { action(branch, .newBranch) }
+            Divider()
+            Button("Rebase \(current) onto \(branch.name)") { action(branch, .rebaseOnto) }
+                .disabled(!branch.isRemote && branch.name == current)
+            Button("Merge \(branch.name) into \(current)") { action(branch, .mergeInto) }
+                .disabled(!branch.isRemote && branch.name == current)
         } label: {
             HStack(spacing: 7) {
                 Color.clear.frame(width: 12, height: 18)

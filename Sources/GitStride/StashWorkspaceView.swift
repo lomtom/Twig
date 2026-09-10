@@ -89,9 +89,7 @@ struct StashWorkspaceView: View {
                 } else if files.isEmpty {
                     Text("无文件").font(.caption).foregroundStyle(.tertiary).padding(.horizontal, 18)
                 } else {
-                    ScrollView {
-                        StashFileTreeView(files: files, focusedFileID: $focusedFileID)
-                    }
+                    StashFileTreeView(files: files, focusedFileID: $focusedFileID)
                 }
             }.frame(maxHeight: .infinity)
                 .dashboardPanel()
@@ -128,13 +126,21 @@ struct StashWorkspaceView: View {
             ContentUnavailableView("Stash", systemImage: "archivebox", description: Text("保存暂时不提交的改动，稍后恢复继续工作。"))
         } else if let detailError {
             ContentUnavailableView("无法读取暂存内容", systemImage: "exclamationmark.triangle", description: Text(detailError))
+        } else if let focusedFile, let preview {
+            SourceFileView(preview: preview, file: focusedFile.change, moveFile: movePreviewFile)
+                .overlay(alignment: .topTrailing) { if loadingPreview { ProgressView().controlSize(.small).padding(14) } }
         } else if loadingFiles || loadingPreview {
             ProgressView("正在读取暂存内容…").frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let focusedFile, let preview {
-            SourceFileView(preview: preview, file: focusedFile.change).id(preview.id)
         } else {
             ContentUnavailableView("没有文件差异", systemImage: "doc.text", description: Text("选择一个文件查看暂存的改动。"))
         }
+    }
+
+    private func movePreviewFile(_ step: Int) {
+        let ordered = ChangeTreeNode.build(files.map(\.change)).flatMap(\.files)
+        guard let path = focusedFile?.change.path, let index = ordered.firstIndex(where: { $0.path == path }) else { return }
+        let next = ordered[min(max(index + step, 0), ordered.count - 1)].path
+        focusedFileID = files.first { $0.change.path == next }?.id
     }
 
     @MainActor private func loadList() async {
@@ -172,8 +178,7 @@ struct StashWorkspaceView: View {
     }
 
     @MainActor private func loadPreview() async {
-        preview = nil
-        guard let entry = selected, let file = focusedFile, let root = model.state?.root else { loadingPreview = false; return }
+        guard let entry = selected, let file = focusedFile, let root = model.state?.root else { preview = nil; loadingPreview = false; return }
         loadingPreview = true
         do {
             let result = try await model.git.stashPreview(file, entry: entry, root: root)

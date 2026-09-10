@@ -21,6 +21,11 @@ private enum GraphStyle {
 struct GraphWorkspaceView: View {
     @EnvironmentObject private var model: RepositoryModel
     @State private var focusedFileID: String?
+    @State private var preview: SourcePreview?
+    @State private var previewLoading = false
+    @FocusState private var graphFocused: Bool
+    private var focusedFile: GraphChangedFile? { model.graphFiles.first { $0.id == focusedFileID } }
+    private var previewKey: String { (model.selectedGraphCommitID ?? "") + ":" + (focusedFileID ?? "") }
     private var rows: [GraphLaneRow] { model.graphLayout.rows }
     private var searching: Bool { model.graphAuthor != nil || !model.graphQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var authors: [String] {
@@ -32,16 +37,12 @@ struct GraphWorkspaceView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 10) {
-                VStack(spacing: 0) {
-                    toolbar
-                    if model.graphIsShallow {
-                        Label("浅克隆仓库 · 提交历史可能不完整", systemImage: "exclamationmark.triangle")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(Color.orange.opacity(0.09))
-                    }
-                    commitList
+                ZStack {
+                    graphCard
+                        .opacity(focusedFileID == nil ? 1 : 0)
+                        .allowsHitTesting(focusedFileID == nil)
+                        .accessibilityHidden(focusedFileID != nil)
+                    if focusedFileID != nil { filePreview }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).dashboardPanel()
                 VStack(spacing: 10) {
                     commitDetail
@@ -58,6 +59,63 @@ struct GraphWorkspaceView: View {
         .onChange(of: model.graphScope) { _, _ in model.refreshGraph() }
         .onChange(of: model.graphSort) { _, _ in model.refreshGraph() }
         .onChange(of: model.selectedGraphCommitID) { _, _ in focusedFileID = nil }
+        .task(id: previewKey) { await loadPreview() }
+    }
+
+    private var graphCard: some View {
+                VStack(spacing: 0) {
+                    toolbar
+                    if model.graphIsShallow {
+                        Label("浅克隆仓库 · 提交历史可能不完整", systemImage: "exclamationmark.triangle")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.09))
+                    }
+                    commitList
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var filePreview: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("提交变更 · " + (model.selectedGraphCommit?.shortOID ?? ""), systemImage: "point.3.connected.trianglepath.dotted")
+                if model.selectedGraphCommit?.parents.count ?? 0 > 1 { Text("相对第一父提交").foregroundStyle(.secondary) }
+                Spacer()
+                Button { focusedFileID = nil; graphFocused = true } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless).help("关闭预览，返回提交图 Esc").keyboardShortcut(.cancelAction)
+            }.font(.caption).padding(.horizontal, 14).frame(height: 36).background(GitStrideStyle.panelHeader)
+            if let file = focusedFile, let preview {
+                SourceFileView(preview: preview, file: file.change, moveFile: movePreviewFile)
+                    .overlay(alignment: .topTrailing) { if previewLoading { ProgressView().controlSize(.small).padding(14) } }
+            } else if previewLoading {
+                ProgressView("正在读取变更…").frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContentUnavailableView("无法读取变更", systemImage: "doc.text")
+            }
+        }
+    }
+
+    private func movePreviewFile(_ step: Int) {
+        let files = ChangeTreeNode.build(model.graphFiles.map(\.change)).flatMap(\.files)
+        guard let index = files.firstIndex(where: { $0.id == focusedFileID }), !files.isEmpty else { return }
+        focusedFileID = files[min(max(index + step, 0), files.count - 1)].id
+    }
+
+    @MainActor private func loadPreview() async {
+        guard let commit = model.selectedGraphCommit, let file = focusedFile, let root = model.state?.root else {
+            preview = nil; previewLoading = false; return
+        }
+        previewLoading = true
+        do {
+            let result = try await model.git.graphFilePreview(file, commit: commit, root: root)
+            guard !Task.isCancelled else { return }
+            preview = result
+        } catch {
+            guard !Task.isCancelled else { return }
+            preview = .message(error.localizedDescription)
+        }
+        previewLoading = false
     }
 
     private var toolbar: some View {
@@ -135,6 +193,7 @@ struct GraphWorkspaceView: View {
                                                        currentUserEmail: model.graphCurrentUserEmail,
                                                        matchesQuery: !searching || matchIDs.contains(row.id)) {
                                             model.selectGraphCommit(row.commit)
+                                            graphFocused = true
                                         }.id(row.id)
                                             .contextMenu { GraphCommitContextMenu(commit: row.commit) }
                                     }
@@ -144,6 +203,9 @@ struct GraphWorkspaceView: View {
                                     }
                                 }.frame(maxWidth: .infinity, alignment: .topLeading)
                             }
+                            .focusable().focusEffectDisabled().focused($graphFocused)
+                            .onKeyPress(.upArrow) { navigateCommit(-1, proxy: proxy); return .handled }
+                            .onKeyPress(.downArrow) { navigateCommit(1, proxy: proxy); return .handled }
                             .defaultScrollAnchor(.top)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             .onAppear { if let first = rows.first { proxy.scrollTo(first.id, anchor: .top) } }
@@ -165,6 +227,15 @@ struct GraphWorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func navigateCommit(_ step: Int, proxy: ScrollViewProxy) {
+        let commits = searching ? model.filteredGraphCommits : model.graphCommits
+        guard !commits.isEmpty else { return }
+        let index = commits.firstIndex { $0.id == model.selectedGraphCommitID } ?? (step > 0 ? -1 : commits.count)
+        let next = commits[min(max(index + step, 0), commits.count - 1)]
+        model.selectGraphCommit(next)
+        proxy.scrollTo(next.id)
     }
 
     private func navigateMatch(_ matches: [GraphCommit], step: Int, proxy: ScrollViewProxy) {
@@ -224,10 +295,8 @@ struct GraphWorkspaceView: View {
                 Text("无变更文件").font(.caption).foregroundStyle(.tertiary).padding(16)
                 Spacer()
             } else {
-                ScrollView {
-                    GraphFileTreeView(files: model.graphFiles, focusedFileID: $focusedFileID)
-                        .id(model.selectedGraphCommitID)
-                }
+                GraphFileTreeView(files: model.graphFiles, focusedFileID: $focusedFileID)
+                    .id(model.selectedGraphCommitID)
             }
         }
     }

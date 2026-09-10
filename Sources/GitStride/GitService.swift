@@ -144,11 +144,11 @@ actor GitService {
         }
         let remotes = try run(["remote"], at: root).text.split(separator: "\n").map(String.init)
         let remote = remotes.contains("origin") ? "origin" : (remotes.count == 1 ? remotes.first : nil)
-        let refs = try run(["for-each-ref", "--format=%(refname)%00%(symref)%00%(upstream)", "refs/heads", "refs/remotes"], at: root).text
+        let refs = try run(["for-each-ref", "--format=%(refname)%00%(symref)%00%(upstream)%00%(objectname)", "refs/heads", "refs/remotes"], at: root).text
         var localBranches: [GitBranch] = [], remoteBranches: [GitBranch] = []
         for line in refs.split(separator: "\n") {
             let fields = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
-            guard fields.count == 3, fields[1].isEmpty else { continue }
+            guard fields.count == 4, fields[1].isEmpty else { continue }
             let ref = fields[0]
             if ref.hasPrefix("refs/heads/") {
                 var ahead = 0, behind = 0
@@ -160,11 +160,11 @@ actor GitService {
                         behind = Int(counts[1]) ?? 0
                     }
                 }
-                localBranches.append(GitBranch(ref: ref, name: String(ref.dropFirst(11)), remote: nil, upstream: fields[2], ahead: ahead, behind: behind))
+                localBranches.append(GitBranch(ref: ref, oid: fields[3], name: String(ref.dropFirst(11)), remote: nil, upstream: fields[2], ahead: ahead, behind: behind))
             } else if ref.hasPrefix("refs/remotes/") {
                 let name = String(ref.dropFirst(13))
                 let remoteName = remotes.sorted { $0.count > $1.count }.first { name.hasPrefix($0 + "/") }
-                remoteBranches.append(GitBranch(ref: ref, name: name, remote: remoteName, upstream: "", ahead: 0, behind: 0))
+                remoteBranches.append(GitBranch(ref: ref, oid: fields[3], name: name, remote: remoteName, upstream: "", ahead: 0, behind: 0))
             }
         }
         var operation: String?
@@ -176,15 +176,12 @@ actor GitService {
         return RepositorySnapshot(root: root, branch: branch, localBranches: localBranches, remoteBranches: remoteBranches, files: files, ahead: ahead, behind: behind, upstream: upstream, remote: remote, headOID: headOID, hasHEAD: head, detached: symbolic.code != 0, operation: operation)
     }
 
-    func applyGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit, expected: RepositorySnapshot) throws {
+    func applyGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit, expected: RepositorySnapshot, stashChanges: Bool = false) throws {
         let current = try snapshot(expected.root)
         guard current.branch == expected.branch, current.headOID == expected.headOID,
               current.hasHEAD, !current.detached, current.operation == nil,
               !current.files.contains(where: \.isConflict), current.files == expected.files else {
             throw GitFailure(message: "仓库状态已改变，请刷新后重新确认操作。")
-        }
-        if action.needsCleanTree && !current.files.isEmpty {
-            throw GitFailure(message: "请先提交或暂存到 Stash，再执行此操作。")
         }
         // Full OIDs only; no user-provided revisions or shell interpolation.
         guard [40, 64].contains(commit.oid.count), commit.oid.allSatisfy({ $0.isHexDigit }) else {
@@ -214,21 +211,96 @@ actor GitService {
             if let parent = action.mainline { args += ["--mainline", String(parent)] }
             args.append(oid)
         }
+        if stashChanges && action.needsCleanTree && !current.files.isEmpty {
+            try run(["stash", "push", "--include-untracked", "--message", "Twig: before " + action.title + " " + commit.shortOID], at: expected.root)
+        }
         try run(args, at: expected.root)
     }
 
-    func finishGraphSequence(abort: Bool, expected: RepositorySnapshot) throws {
+    func finishGraphSequence(abort: Bool, expected: RepositorySnapshot, skip: Bool = false) throws {
         let current = try snapshot(expected.root)
         guard current.branch == expected.branch, current.headOID == expected.headOID,
               current.operation == expected.operation, let operation = current.operation,
-              ["挑选提交", "撤销提交"].contains(operation) else {
+              ["合并", "变基", "挑选提交", "撤销提交"].contains(operation) else {
             throw GitFailure(message: "进行中的操作已改变，请刷新后重试。")
         }
-        if !abort && current.files.contains(where: \.isConflict) {
+        if !abort && !skip && current.files.contains(where: \.isConflict) {
             throw GitFailure(message: "请先解决并暂存所有冲突。")
         }
-        let command = operation == "挑选提交" ? "cherry-pick" : "revert"
-        try run(["-c", "core.editor=true", command, abort ? "--abort" : "--continue"], at: expected.root)
+        let commands = ["合并": "merge", "变基": "rebase", "挑选提交": "cherry-pick", "撤销提交": "revert"]
+        guard let command = commands[operation], !skip || ["rebase", "cherry-pick"].contains(command) else {
+            throw GitFailure(message: "当前操作不支持跳过提交。")
+        }
+        try run(["-c", "core.editor=true", "-c", "sequence.editor=true", command, skip ? "--skip" : (abort ? "--abort" : "--continue")], at: expected.root)
+    }
+
+    func conflictDocument(_ request: ConflictRequest) throws -> ConflictDocument {
+        let root = request.expected.root
+        let fileURL = root.appendingPathComponent(request.file.path)
+        let resolvedRoot = root.resolvingSymlinksInPath().path
+        let parent = fileURL.deletingLastPathComponent().resolvingSymlinksInPath().path
+        guard parent == resolvedRoot || parent.hasPrefix(resolvedRoot + "/") else {
+            throw GitFailure(message: "文件父目录指向仓库外，无法安全解决冲突。")
+        }
+        let entries = try run(["ls-files", "--unmerged", "-z", "--", request.file.path], at: root).output
+        var stages: [ConflictStage] = []
+        for entry in entries.split(separator: 0) {
+            guard let tab = entry.firstIndex(of: 9) else { continue }
+            let fields = String(decoding: entry[..<tab], as: UTF8.self).split(separator: " ")
+            guard fields.count == 3, let stage = Int(fields[2]) else { continue }
+            let oid = String(fields[1])
+            let size = try run(["cat-file", "-s", oid], at: root).text.trimmingCharacters(in: .newlines)
+            let data = (Int(size) ?? Int.max) <= 2_000_000 && fields[0] != "160000" ? try run(["cat-file", "-p", oid], at: root).output : nil
+            stages.append(ConflictStage(number: stage, mode: String(fields[0]), oid: oid, data: data))
+        }
+        guard !stages.isEmpty else { throw GitFailure(message: "此文件已不再有未解决冲突，请关闭后刷新。") }
+        let link = try? FileManager.default.destinationOfSymbolicLink(atPath: fileURL.path)
+        let values = try? fileURL.resourceValues(forKeys: [.isDirectoryKey])
+        let data: Data?
+        if link != nil || values?.isDirectory == true { data = nil }
+        else if FileManager.default.fileExists(atPath: fileURL.path) { data = try Data(contentsOf: fileURL, options: .mappedIfSafe) }
+        else { data = nil }
+        return ConflictDocument(request: request, stages: stages, worktree: data, symbolicLink: link)
+    }
+
+    func resolveConflict(_ document: ConflictDocument, resolution: ConflictResolution) throws {
+        let request = document.request
+        let root = request.expected.root
+        let current = try snapshot(root)
+        guard current.headOID == request.expected.headOID, current.branch == request.expected.branch,
+              current.operation == request.expected.operation else { throw GitFailure(message: "仓库状态已改变，请重新打开冲突文件。") }
+        let latest = try conflictDocument(request)
+        guard latest.stages == document.stages else { throw GitFailure(message: "冲突版本已改变，请重新打开文件。") }
+        if case .workingTree = resolution { } else {
+            guard latest.worktree == document.worktree, latest.symbolicLink == document.symbolicLink else {
+                throw GitFailure(message: "工作区文件已被外部修改。请关闭后重新打开，避免覆盖新的改动。")
+            }
+        }
+        let path = request.file.path
+        switch resolution {
+        case let .edited(text):
+            guard latest.canEdit, !MergeChunk.containsMarkers(text) else { throw GitFailure(message: "请先处理所有冲突标记；此文件必须是可编辑文本。") }
+            let url = root.appendingPathComponent(path)
+            try Data(text.utf8).write(to: url, options: .atomic)
+            let mode = latest.ours?.mode ?? latest.theirs?.mode
+            try FileManager.default.setAttributes([.posixPermissions: mode == "100755" ? 0o755 : 0o644], ofItemAtPath: url.path)
+            try run(["add", "--", path], at: root)
+        case .ours, .theirs:
+            guard latest.canSelectSide else { throw GitFailure(message: "此类型请在外部解决后标记完成。") }
+            let ours: Bool
+            if case .ours = resolution { ours = true } else { ours = false }
+            if (ours ? latest.ours : latest.theirs) == nil {
+                try run(["rm", "--force", "--", path], at: root)
+            } else {
+                try run(["checkout", ours ? "--ours" : "--theirs", "--", path], at: root)
+                try run(["add", "--", path], at: root)
+            }
+        case .workingTree:
+            if let data = latest.worktree, !data.contains(0), let text = String(data: data, encoding: .utf8), MergeChunk.containsMarkers(text) {
+                throw GitFailure(message: "工作区文件仍包含冲突标记，请先解决。")
+            }
+            try run(["add", "--all", "--", path], at: root)
+        }
     }
 
     func sourcePreview(_ file: ChangedFile, in state: RepositorySnapshot) throws -> SourcePreview {
@@ -344,7 +416,9 @@ actor GitService {
     }
 
     func graphCommitFiles(_ oid: String, root: URL) throws -> [GraphChangedFile] {
-        let data = try run(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "--find-renames", oid], at: root).output
+        let parents = try run(["show", "-s", "--format=%P", oid], at: root).text.split(whereSeparator: \.isWhitespace)
+        let revisions = parents.first.map { [String($0), oid] } ?? [oid]
+        let data = try run(["diff-tree", "--root", "--no-commit-id", "--name-status", "-r", "-z", "--find-renames"] + revisions, at: root).output
         let fields = data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) }
         var files: [GraphChangedFile] = []
         var index = 0
@@ -359,6 +433,34 @@ actor GitService {
             files.append(GraphChangedFile(status: status, path: path, previousPath: previousPath))
         }
         return files
+    }
+
+    func graphFilePreview(_ file: GraphChangedFile, commit: GraphCommit, root: URL) throws -> SourcePreview {
+        let target = commit.oid + ":" + file.path
+        let base = commit.parents.first
+        let original = base.map { $0 + ":" + (file.previousPath ?? file.path) }
+        for object in [original, target].compactMap({ $0 }) {
+            let size = try run(["cat-file", "-s", object], at: root, allowFailure: true)
+            if let bytes = Int(size.text.trimmingCharacters(in: .newlines)), bytes > 2_000_000 {
+                return .message("文件超过 2 MB，请在外部工具中查看。")
+            }
+        }
+        let options = ["--patch", "--no-ext-diff", "--no-textconv", "--no-color", "--word-diff=none", "--text", "--unified=2147483647", "--find-renames"]
+        var args: [String]
+        if let base { args = ["diff"] + options + [base, commit.oid, "--"] }
+        else { args = ["show", "--format=", "--root"] + options + [commit.oid, "--"] }
+        args += file.change.commitPaths
+        let data = try run(["-c", "diff.suppressBlankEmpty=false"] + args, at: root).output
+        guard !data.contains(0), let patch = String(data: data, encoding: .utf8) else {
+            return .message("二进制或非 UTF-8 文件，无法显示文本差异。")
+        }
+        if let preview = SourcePreview.patch(patch) { return preview }
+        let type = try run(["cat-file", "-t", target], at: root, allowFailure: true)
+        guard type.code == 0 else { return .message("文件已删除，没有文本差异。") }
+        guard type.text.trimmingCharacters(in: .newlines) == "blob" else { return .message("子模块或目录，没有文本预览。") }
+        let content = try run(["cat-file", "-p", target], at: root).output
+        guard !content.contains(0), let text = String(data: content, encoding: .utf8) else { return .message("二进制或非 UTF-8 文件。") }
+        return .source(text, added: file.status.hasPrefix("A"), notice: text.isEmpty ? "空文件" : "没有文本改动，显示提交中的文件。")
     }
 
     func addToGit(_ file: ChangedFile, root: URL) throws {
@@ -391,20 +493,42 @@ actor GitService {
     func pull(root: URL) throws { try run(["-c", "merge.autostash=false", "-c", "rebase.autostash=false", "pull", "--ff-only", "--no-rebase"], at: root) }
     func push(state: RepositorySnapshot) throws {
         let current = try snapshot(state.root)
-        guard current.branch == state.branch, current.upstream == state.upstream, current.remote == state.remote, !current.detached, current.operation == nil else {
+        guard current.branch == state.branch, current.upstream == state.upstream, current.remote == state.remote, current.headOID == state.headOID, !current.detached, current.operation == nil else {
             throw GitFailure(message: "仓库或分支状态已变化，请刷新后重试。")
         }
+        guard let head = state.headOID else { throw GitFailure(message: "当前分支还没有提交。") }
         if state.upstream != nil {
             let remote = try run(["config", "--get", "branch.\(state.branch).remote"], at: state.root).text.trimmingCharacters(in: .newlines)
             let target = try run(["config", "--get", "branch.\(state.branch).merge"], at: state.root).text.trimmingCharacters(in: .newlines)
             guard target.hasPrefix("refs/heads/"), !remote.isEmpty else { throw GitFailure(message: "上游配置无效，请在终端检查。") }
-            try run(["-c", "remote.\(remote).mirror=false", "push", "--no-follow-tags", "--", remote, "HEAD:\(target)"], at: state.root)
+            try run(["-c", "remote.\(remote).mirror=false", "push", "--no-follow-tags", "--", remote, "\(head):\(target)"], at: state.root)
         } else if let remote = state.remote {
-            try run(["-c", "remote.\(remote).mirror=false", "push", "--no-follow-tags", "--set-upstream", "--", remote, "HEAD:refs/heads/\(state.branch)"], at: state.root)
+            try run(["-c", "remote.\(remote).mirror=false", "push", "--no-follow-tags", "--", remote, "\(head):refs/heads/\(state.branch)"], at: state.root)
+            try run(["config", "branch.\(state.branch).remote", remote], at: state.root)
+            try run(["config", "branch.\(state.branch).merge", "refs/heads/" + state.branch], at: state.root)
         } else {
             throw GitFailure(message: "仓库没有可用的默认远程。请在终端配置 origin 后刷新。")
         }
     }
+    func outgoingCommits(_ state: RepositorySnapshot) throws -> [GraphCommit] {
+        guard let head = state.headOID else { return [] }
+        let upstreamRef = state.localBranches.first(where: { $0.name == state.branch }).map(\.upstream).flatMap { $0.isEmpty ? nil : $0 }
+        let baseline = upstreamRef ?? state.remote.map { "refs/remotes/" + $0 + "/" + state.branch }
+        var revisions = [head]
+        if let baseline {
+            let result = try run(["rev-parse", "--verify", baseline + "^{commit}"], at: state.root, allowFailure: true)
+            if result.code == 0 { revisions.append("^" + result.text.trimmingCharacters(in: .newlines)) }
+        }
+        let data = try run(["log", "--topo-order", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%s%x1e"] + revisions + ["--"], at: state.root).output
+        return data.split(separator: 0x1e).compactMap { record in
+            let fields = record.split(separator: 0, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
+            guard fields.count == 6 else { return nil }
+            return GraphCommit(oid: fields[0].trimmingCharacters(in: .newlines), parents: fields[1].split(separator: " ").map(String.init),
+                               author: fields[2], email: fields[3], date: Date(timeIntervalSince1970: Double(fields[4]) ?? 0),
+                               subject: fields[5], body: fields[5], references: [])
+        }
+    }
+
     func switchBranch(_ name: String, create: Bool, root: URL) throws {
         guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }
         try run(["check-ref-format", "--branch", name], at: root)
@@ -423,6 +547,18 @@ actor GitService {
     func deleteBranch(_ branch: String, root: URL) throws {
         try run(["branch", "-d", "--", branch], at: root)
     }
+    func deleteRemoteBranch(_ branch: GitBranch, root: URL) throws {
+        guard branch.isRemote, let remote = branch.remote, branch.name.hasPrefix(remote + "/") else {
+            throw GitFailure(message: "远程分支配置无效。")
+        }
+        let name = String(branch.name.dropFirst(remote.count + 1))
+        let oid = branch.oid
+        guard [40, 64].contains(oid.count), oid.allSatisfy({ $0.isHexDigit }) else { throw GitFailure(message: "远程分支 ID 无效，请刷新后重试。") }
+        // Refuse deletion if the server advanced since the last fetch.
+        try run(["-c", "remote.\(remote).mirror=false", "push", "--no-follow-tags",
+                 "--force-with-lease=refs/heads/\(name):\(oid)", "--", remote, ":refs/heads/" + name], at: root)
+    }
+
     func rebaseCurrentBranch(onto branch: String, root: URL) throws {
         try run(["rebase", "--", branch], at: root)
     }

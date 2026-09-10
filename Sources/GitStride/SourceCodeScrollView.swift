@@ -40,9 +40,11 @@ struct SourceCodeScrollView: NSViewRepresentable {
     let preview: SourcePreview
     let targetLine: Int?
     let navigationID: UUID
+    var moveFile: ((Int) -> Void)? = nil
 
     func makeNSView(context: Context) -> SourceScrollContainer { SourceScrollContainer() }
     func updateNSView(_ view: SourceScrollContainer, context: Context) {
+        view.moveFile = moveFile
         view.update(preview: preview, targetLine: targetLine, navigationID: navigationID)
     }
 }
@@ -51,6 +53,8 @@ final class SourceScrollContainer: NSView {
     private let scrollView = NSScrollView()
     private let code = SourceTextView()
     private let gutter = SourceGutterView()
+    var moveFile: ((Int) -> Void)? { didSet { code.moveFile = moveFile } }
+    private var displayedLines: [SourceLine] = []
     private var previewID: UUID?
     private var navigationID: UUID?
     private var pendingLine: Int?
@@ -88,7 +92,9 @@ final class SourceScrollContainer: NSView {
     deinit { NotificationCenter.default.removeObserver(self) }
 
     func update(preview: SourcePreview, targetLine: Int?, navigationID: UUID) {
-        if previewID != preview.id {
+        if previewID != preview.id || displayedLines != preview.lines {
+            let changedFile = previewID != preview.id
+            displayedLines = preview.lines
             previewID = preview.id
             rows = preview.lines.count
             code.lines = preview.lines
@@ -110,8 +116,10 @@ final class SourceScrollContainer: NSView {
                 ]))
             }
             code.textStorage?.setAttributedString(text)
-            scrollView.contentView.scroll(to: .zero)
-            pendingLine = targetLine ?? preview.lines.firstIndex(where: { $0.kind != .context }) ?? 0
+            if changedFile {
+                scrollView.contentView.scroll(to: .zero)
+                pendingLine = targetLine ?? preview.lines.firstIndex(where: { $0.kind != .context }) ?? 0
+            }
             code.needsDisplay = true
             gutter.needsDisplay = true
         }
@@ -143,6 +151,14 @@ final class SourceScrollContainer: NSView {
 }
 
 private final class SourceTextView: NSTextView {
+    var moveFile: ((Int) -> Void)?
+    override func keyDown(with event: NSEvent) {
+        if let moveFile, event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .function]).isEmpty,
+           event.keyCode == 125 || event.keyCode == 126 {
+            moveFile(event.keyCode == 125 ? 1 : -1)
+        } else { super.keyDown(with: event) }
+    }
+
     var lines: [SourceLine] = []
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)

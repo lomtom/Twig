@@ -67,9 +67,6 @@ struct GraphCommitContextMenu: View {
             Button("查看提交详情") { model.selectGraphCommit(commit) }
         }
         Section("应用提交") {
-            if model.canModifyGraphHistory && !model.canApplyGraphCommit {
-                Text("请先提交或 Stash 工作区改动").foregroundStyle(.secondary)
-            }
             if commit.parents.count > 1 {
                 Menu("Cherry-pick…") {
                     ForEach(commit.parents.indices, id: \.self) { parent in
@@ -87,9 +84,7 @@ struct GraphCommitContextMenu: View {
             }
         }
         Section("移动分支") {
-            Menu("Reset to Here…") {
-                ForEach(GraphResetMode.allCases) { mode in action(mode.title + "…", .reset(mode)) }
-            }.disabled(!model.canModifyGraphHistory)
+            action("Reset to Here…", .reset(.mixed)).disabled(!model.canModifyGraphHistory)
             action("Undo Commit · 保留改动…", .undo)
                 .disabled(!model.canModifyGraphHistory || commit.oid != model.state?.headOID || commit.parents.isEmpty)
         }
