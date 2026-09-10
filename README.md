@@ -31,6 +31,7 @@ open dist/Twig.app
 - 分支选择紧邻项目名称右侧，分为本地分支和远程分支，按 `/` 组织为目录式子菜单。支持创建本地分支，选择远程分支时切换到已有跟踪分支或创建同名本地跟踪分支。未提交改动如果会被覆盖，Git 会阻止切换。
 - 回滚、推送、拉取、携带未提交改动切换分支均需确认；回滚执行前重新核对仓库、HEAD 与文件状态。
 - 底部状态栏已移除；耗时操作在顶部显示进度。保留 Finder / 终端入口。
+- 原生设置页支持跟随系统／浅色／深色主题、启动恢复项目，以及仅快进／变基／合并三种默认拉取方式。
 - 明暗外观跟随系统，常用键盘快捷键。
 
 ## 操作约定
@@ -57,30 +58,29 @@ open dist/Twig.app
 | 打开 Graph | ⌘3 |
 | 提交所选文件 | ⌘Return |
 
+## 设置
+
+- **主题**：跟随系统、浅色或深色，修改后立即应用。
+- **启动恢复**：开启时，仅恢复上次退出前仍打开的项目；手动关闭项目后不会恢复。关闭此选项后始终进入欢迎页。
+- **默认拉取方式**：仅快进会在分叉时停止；变基会重放本地提交；合并会在分叉时创建合并提交。三种方式均不自动暂存本地改动。
+
 ## 目录
 
-- `Sources/GitStride/GitService.swift`：Git 命令执行、状态解析及仓库操作。
-- `Sources/GitStride/RepositoryModel.swift`：界面状态和异步操作协调。
-- `Sources/GitStride/ContentView.swift`：仓库界面、文件分区和操作弹窗。
-- `Sources/GitStride/ChangeTreeView.swift`：目录树与逐文件选择。
-- `Sources/GitStride/BranchMenuItems.swift`：本地 / 远程分支模型与分组菜单。
-- `Sources/GitStride/SourcePreview.swift`：目录树模型与完整源文件差异解析。
-- `Sources/GitStride/SourceFileView.swift`：源文件标题栏、增删计数与改动跳转。
-- `Sources/GitStride/SourceCodeScrollView.swift`：AppKit 代码滚动视图与固定行号栏。
-- `Sources/GitStride/StashModels.swift`：Stash 记录与文件模型。
-- `Sources/GitStride/StashWorkspaceView.swift`：Stash 列表、文件预览和操作入口。
-- `Sources/GitStride/GraphModels.swift`：提交图数据、引用与逐行绘制模型。
-- `Sources/GitStride/GraphLayout.swift`：基于 rebased / IntelliJ 思路的布局索引、边排序与跨行几何；来源及许可证见 `ThirdPartyNotices/rebased.md`。
-- `Sources/GitStride/GraphWorkspaceView.swift`：提交图、筛选与提交详情界面。
-- `Sources/GitStride/FileActionSheet.swift`：回滚清单确认、暂存说明与操作确认模型。
-- `Sources/GitStride/GitStrideApp.swift`：应用入口与菜单。
+- `Sources/GitStride/App/`：应用入口、共享 UI 与设置页。
+- `Sources/GitStride/Core/`：仓库状态协调、Git 服务、仓库监听器及共享领域模型。
+- `Sources/GitStride/Features/Workspace/`：欢迎页、Commit 工作区、侧边栏、分支与文件树。
+- `Sources/GitStride/Features/Diff/`：完整源文件差异解析、Diff 标题栏与 AppKit 代码滚动视图。
+- `Sources/GitStride/Features/Graph/`：提交图数据、布局、操作菜单与工作区。
+- `Sources/GitStride/Features/Stash/`：Stash 记录、文件树与预览工作区。
+- `Sources/GitStride/Features/Conflict/`：冲突解决界面与合并文档处理。
+- `Sources/GitStride/Features/Operations/`：回滚、暂存、推送和历史操作的确认界面。
 - `scripts/build-app.sh`：Release 构建、图标生成和 `.app` 打包。
 
 按项目要求不编写测试代码。构建和原生界面检查不依赖测试框架。
 
 ## 工作区交互
 
-- 自动记住成功打开的仓库，下次启动默认恢复；路径不存在时保留欢迎页。
+- 自动记住成功打开的仓库；启动恢复受设置项及项目是否被手动关闭共同控制，路径不存在时保留欢迎页。
 - Commit、Stash、Graph 共用目录行组件，目录末尾显示所有后代文件的数量；Stash 与 Graph 共用文件浏览树。
 - Graph 点击变更文件后，在原图卡片显示该提交的差异预览；合并提交相对第一父提交比较。关闭按钮或 Esc 返回原图，保留提交选择和滚动位置。
 - Graph 提交列表支持 ↑ / ↓ 切换选择。文件树和代码预览获得焦点后，↑ / ↓ 切换文件；改动跳转仍使用预览工具栏按钮。

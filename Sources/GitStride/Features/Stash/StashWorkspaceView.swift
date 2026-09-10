@@ -97,7 +97,7 @@ struct StashWorkspaceView: View {
                         )
                     )
                 }
-            }.frame(maxHeight: .infinity)
+            }.frame(maxHeight: .infinity, alignment: .top)
                 .dashboardPanel()
             stashActions
         }
@@ -115,7 +115,7 @@ struct StashWorkspaceView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                 }.buttonStyle(.borderedProminent).disabled(!canRestore)
                 Button { if let selected { model.requestStashAction(selected, action: .pop) } } label: {
-                    Label("恢复并移除", systemImage: "tray.and.arrow.up")
+                    Label("恢复后删除", systemImage: "tray.and.arrow.up")
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                 }.buttonStyle(.bordered).disabled(!canRestore)
             }
@@ -129,7 +129,25 @@ struct StashWorkspaceView: View {
 
     @ViewBuilder private var detail: some View {
         if selected == nil {
-            ContentUnavailableView("Stash", systemImage: "archivebox", description: Text("保存暂时不提交的改动，稍后恢复继续工作。"))
+            VStack(spacing: 18) {
+                Image(systemName: "archivebox")
+                    .font(.system(size: 42, weight: .light))
+                    .foregroundStyle(GitStrideStyle.accent)
+                VStack(spacing: 8) {
+                    Text("还没有搁置的改动").font(.title3).fontWeight(.medium)
+                    Text("在 Commit 中勾选想暂时搁置的文件，点击文件列表顶部的存档按钮，填写说明后即可创建 Stash。")
+                        .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .frame(maxWidth: 410)
+                }
+                Button {
+                    model.requestedDestination = .commit
+                } label: {
+                    Label("前往 Commit 创建 Stash", systemImage: "arrow.right")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let detailError {
             ContentUnavailableView("无法读取暂存内容", systemImage: "exclamationmark.triangle", description: Text(detailError))
         } else if let focusedFile, let preview {

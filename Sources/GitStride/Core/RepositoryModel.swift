@@ -36,13 +36,16 @@ final class RepositoryModel: ObservableObject {
         let defaults = UserDefaults.standard
         let recentPaths = defaults.stringArray(forKey: "recentRepositories") ?? []
         let path = defaults.string(forKey: Self.lastRepositoryKey) ?? recentPaths.first
+        let restoreProjectsOnLaunch = defaults.object(forKey: AppPreferenceKey.restoreProjectsOnLaunch) == nil
+            ? true
+            : defaults.bool(forKey: AppPreferenceKey.restoreProjectsOnLaunch)
         // Existing installations restored their last repository unconditionally;
         // retain that behavior until the user explicitly closes a project.
         let shouldRestore = defaults.object(forKey: Self.shouldRestoreRepositoryKey) == nil
             ? path != nil
             : defaults.bool(forKey: Self.shouldRestoreRepositoryKey)
         recent = recentPaths
-        repositoryPathToRestore = shouldRestore ? path : nil
+        repositoryPathToRestore = shouldRestore && restoreProjectsOnLaunch ? path : nil
         isRestoringLastRepository = repositoryPathToRestore != nil
     }
 
@@ -180,6 +183,10 @@ final class RepositoryModel: ObservableObject {
             // Cover changes between the initial snapshot and watcher startup.
             requestLocalRefresh(metadata: true)
         }
+    }
+
+    private var pullStrategy: PullStrategy {
+        PullStrategy(rawValue: UserDefaults.standard.string(forKey: AppPreferenceKey.pullStrategy) ?? "") ?? .fastForwardOnly
     }
 
     func refreshCommitLocalState() { requestLocalRefresh(metadata: true) }
@@ -346,15 +353,16 @@ final class RepositoryModel: ObservableObject {
 
     func pull() {
         guard canSync, let state else { return }
-        confirmation = OperationConfirmation(title: "确认拉取？", message: "从“\(state.upstream ?? "上游")”拉取并更新当前分支和工作区，仅允许快进。") { [weak self] in
+        let strategy = pullStrategy
+        confirmation = OperationConfirmation(title: "确认拉取？", message: "从“\(state.upstream ?? "上游")”拉取并更新当前分支和工作区。\(strategy.detail)") { [weak self] in
             guard let self, self.state?.root == state.root, self.state?.branch == state.branch, self.state?.upstream == state.upstream, self.state?.headOID == state.headOID else { return }
-            self.executePull() }
+            self.executePull(strategy: strategy) }
     }
 
-    private func executePull() {
+    private func executePull(strategy: PullStrategy) {
         guard canSync, let state else { return }
         perform("正在拉取…", recover: true) {
-            try await self.git.pull(root: state.root)
+            try await self.git.pull(root: state.root, strategy: strategy)
             try await self.reload()
             self.notice = "拉取完成"
         }

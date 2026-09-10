@@ -67,6 +67,18 @@ actor GitService {
         return URL(fileURLWithPath: value.hasSuffix("\n") ? String(value.dropLast()) : value)
     }
 
+    func environmentStatus() -> GitEnvironmentStatus {
+        let version = try? run(["--version"], allowFailure: true)
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/git"), version?.code == 0 else {
+            return GitEnvironmentStatus(gitAvailable: false, authorNameConfigured: false, authorEmailConfigured: false)
+        }
+        let nameResult = try? run(["config", "--global", "--get", "user.name"], allowFailure: true)
+        let emailResult = try? run(["config", "--global", "--get", "user.email"], allowFailure: true)
+        let name = nameResult?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let email = emailResult?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return GitEnvironmentStatus(gitAvailable: true, authorNameConfigured: !name.isEmpty, authorEmailConfigured: !email.isEmpty)
+    }
+
     func watchMetadataRoots(_ root: URL) throws -> [URL] {
         try ["--git-dir", "--git-common-dir"].map { argument in
             let path = try run(["rev-parse", "--path-format=absolute", argument], at: root)
@@ -454,7 +466,18 @@ actor GitService {
     }
 
     func fetch(root: URL) throws { try run(["fetch", "--all"], at: root) }
-    func pull(root: URL) throws { try run(["-c", "merge.autostash=false", "-c", "rebase.autostash=false", "pull", "--ff-only", "--no-rebase"], at: root) }
+    func pull(root: URL, strategy: PullStrategy) throws {
+        let arguments: [String]
+        switch strategy {
+        case .fastForwardOnly:
+            arguments = ["pull", "--ff-only", "--no-rebase"]
+        case .rebase:
+            arguments = ["pull", "--rebase"]
+        case .merge:
+            arguments = ["pull", "--no-rebase"]
+        }
+        try run(["-c", "merge.autostash=false", "-c", "rebase.autostash=false"] + arguments, at: root)
+    }
     func push(state: RepositorySnapshot) throws {
         let current = try snapshot(state.root)
         guard current.branch == state.branch, current.upstream == state.upstream, current.remote == state.remote, current.headOID == state.headOID, !current.detached, current.operation == nil else {

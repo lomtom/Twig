@@ -4,6 +4,7 @@ import AppKit
 @main
 struct TwigApp: App {
     @StateObject private var model = RepositoryModel()
+    @AppStorage(AppPreferenceKey.theme) private var theme = AppTheme.system.rawValue
 
     init() { NSApplication.shared.setActivationPolicy(.regular) }
 
@@ -11,10 +12,14 @@ struct TwigApp: App {
         Window("Twig", id: "main") {
             MainWorkspaceView().environmentObject(model)
                 .frame(minWidth: 1040, minHeight: 640)
+                .preferredColorScheme((AppTheme(rawValue: theme) ?? .system).colorScheme)
                 .background(WindowChromeConfigurator(isWelcome: model.state == nil && !model.isRestoringLastRepository).frame(width: 0, height: 0))
                 .onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
         }
         .defaultSize(width: 1200, height: 790)
+        Settings {
+            SettingsView()
+        }
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("打开仓库…") { model.chooseRepository() }.keyboardShortcut("o").disabled(model.busy)

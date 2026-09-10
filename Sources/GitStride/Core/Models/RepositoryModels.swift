@@ -1,5 +1,15 @@
 import Foundation
 
+struct GitEnvironmentStatus: Equatable, Sendable {
+    let gitAvailable: Bool
+    let authorNameConfigured: Bool
+    let authorEmailConfigured: Bool
+
+    var isReadyToCommit: Bool {
+        gitAvailable && authorNameConfigured && authorEmailConfigured
+    }
+}
+
 struct ChangedFile: Identifiable, Hashable {
     let path: String
     let previousPath: String?

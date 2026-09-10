@@ -6,6 +6,7 @@ struct MainWorkspaceView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: WorkspaceDestination? = .commit
     @State private var commandPressed = false
+    @State private var environmentStatus: GitEnvironmentStatus?
 
     private var mainContent: some View {
         Group {
@@ -103,6 +104,7 @@ struct MainWorkspaceView: View {
             model.restoreLastRepository()
             if destination == .commit { model.refreshCommitLocalState() }
         }
+        .task { environmentStatus = await model.git.environmentStatus() }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             model.refreshCommitLocalState()
@@ -172,6 +174,7 @@ struct MainWorkspaceView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
+                environmentGuidance
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -260,7 +263,17 @@ struct MainWorkspaceView: View {
             if state.operation != nil || state.files.contains(where: \.isConflict) {
                 ConflictOperationBanner(state: state)
             } else if state.detached {
-                warning("当前处于游离 HEAD。请先创建或切换到一个分支，再提交和同步。")
+                guidanceBanner(
+                    "当前处于游离 HEAD，无法提交或同步。请创建一个分支以保留后续工作。",
+                    icon: "arrow.triangle.branch",
+                    actionTitle: "创建分支"
+                ) { model.showBranch = true }
+            } else if state.remote == nil {
+                guidanceBanner(
+                    "此仓库尚未配置远程地址；可以继续本地提交，但暂时无法获取、拉取或推送。",
+                    icon: "network",
+                    actionTitle: "在终端中配置"
+                ) { model.openTerminal() }
             }
             GeometryReader { geometry in
                 let listWidth = min(390, max(300, geometry.size.width * 0.30))
@@ -283,6 +296,61 @@ struct MainWorkspaceView: View {
             Button("在终端中打开", action: model.openTerminal).buttonStyle(.link)
         }.padding(.horizontal, 16).padding(.vertical, 10)
             .background(Color.orange.opacity(0.10))
+    }
+
+    @ViewBuilder private var environmentGuidance: some View {
+        if let environmentStatus, !environmentStatus.isReadyToCommit {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("开始前检查", systemImage: "checklist")
+                    .font(.caption).fontWeight(.semibold).foregroundStyle(.secondary)
+                if !environmentStatus.gitAvailable {
+                    guidanceRow(
+                        "未检测到 Git",
+                        detail: "请在终端运行 xcode-select --install，完成后重新打开 Twig。",
+                        command: "xcode-select --install"
+                    )
+                }
+                if environmentStatus.gitAvailable && (!environmentStatus.authorNameConfigured || !environmentStatus.authorEmailConfigured) {
+                    guidanceRow(
+                        "尚未配置提交身份",
+                        detail: "Git 需要 user.name 和 user.email 才能创建提交。",
+                        command: "git config --global user.name \"你的名字\"\ngit config --global user.email \"you@example.com\""
+                    )
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: 440, alignment: .leading)
+            .background(GitStrideStyle.panel.opacity(0.70), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+
+    private func guidanceRow(_ title: String, detail: String, command: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout).fontWeight(.medium)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button("复制命令") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+                model.notice = "已复制处理命令。"
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+        }
+    }
+
+    private func guidanceBanner(_ text: String, icon: String, actionTitle: String, action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).foregroundStyle(.orange)
+            Text(text).font(.callout)
+            Spacer()
+            Button(actionTitle, action: action).buttonStyle(.link)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(Color.orange.opacity(0.10))
     }
 
     private func changesList(_ state: RepositorySnapshot) -> some View {
