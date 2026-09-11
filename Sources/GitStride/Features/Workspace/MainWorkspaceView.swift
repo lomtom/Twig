@@ -392,7 +392,14 @@ struct MainWorkspaceView: View {
                     CommitMessageHistoryButton()
                 }.font(.caption).foregroundStyle(.secondary)
                 ZStack(alignment: .topLeading) {
-                    if model.message.isEmpty { Text("这次改了什么？").foregroundStyle(.tertiary).padding(.horizontal, 9).padding(.vertical, 12).allowsHitTesting(false) }
+                    if model.message.isEmpty {
+                        Text("这次改了什么？")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .allowsHitTesting(false)
+                    }
                     TextEditor(text: $model.message).font(.body).scrollContentBackground(.hidden).padding(5)
                         .accessibilityLabel("提交说明").disabled(model.busy)
                 }.frame(height: 94).background(GitStrideStyle.input, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
