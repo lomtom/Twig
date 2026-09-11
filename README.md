@@ -2,6 +2,8 @@
 
 一个只保留日常操作的 macOS 原生 Git 工具。SwiftUI 界面，系统 Git，无第三方依赖。
 
+![](./doc/image/commit.jpg)
+
 ## 启动
 
 需要 macOS 14 或更新版本，以及已安装的 Git（Xcode Command Line Tools 提供）。
