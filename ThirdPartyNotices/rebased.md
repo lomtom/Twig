@@ -1,6 +1,6 @@
 # IntelliJ / rebased graph layout
 
-`Sources/GitStride/GraphLayout.swift` adapts the DFS layout-index assignment,
+`Sources/Twig/GraphLayout.swift` adapts the DFS layout-index assignment,
 edge ordering and per-row print-element approach in DetachHead/rebased (IntelliJ):
 
 - https://github.com/DetachHead/rebased/blob/master/platform/vcs-log/graph/src/com/intellij/vcs/log/graph/impl/permanent/GraphLayoutBuilder.kt

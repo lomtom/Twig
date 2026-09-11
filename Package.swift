@@ -5,5 +5,5 @@ let package = Package(
     name: "Twig",
     platforms: [.macOS(.v14)],
     products: [.executable(name: "Twig", targets: ["Twig"])],
-    targets: [.executableTarget(name: "Twig", path: "Sources/GitStride")]
+    targets: [.executableTarget(name: "Twig", path: "Sources/Twig")]
 )

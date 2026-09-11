@@ -77,14 +77,14 @@ open dist/Twig.app
 
 ## 目录
 
-- `Sources/GitStride/App/`：应用入口、共享 UI 与设置页。
-- `Sources/GitStride/Core/`：仓库状态协调、Git 服务、仓库监听器及共享领域模型。
-- `Sources/GitStride/Features/Workspace/`：欢迎页、Commit 工作区、侧边栏、分支与文件树。
-- `Sources/GitStride/Features/Diff/`：完整源文件差异解析、Diff 标题栏与 AppKit 代码滚动视图。
-- `Sources/GitStride/Features/Graph/`：提交图数据、布局、操作菜单与工作区。
-- `Sources/GitStride/Features/Stash/`：Stash 记录、文件树与预览工作区。
-- `Sources/GitStride/Features/Conflict/`：冲突解决界面与合并文档处理。
-- `Sources/GitStride/Features/Operations/`：回滚、暂存、推送和历史操作的确认界面。
+- `Sources/Twig/App/`：应用入口、共享 UI 与设置页。
+- `Sources/Twig/Core/`：仓库状态协调、Git 服务、仓库监听器及共享领域模型。
+- `Sources/Twig/Features/Workspace/`：欢迎页、Commit 工作区、侧边栏、分支与文件树。
+- `Sources/Twig/Features/Diff/`：完整源文件差异解析、Diff 标题栏与 AppKit 代码滚动视图。
+- `Sources/Twig/Features/Graph/`：提交图数据、布局、操作菜单与工作区。
+- `Sources/Twig/Features/Stash/`：Stash 记录、文件树与预览工作区。
+- `Sources/Twig/Features/Conflict/`：冲突解决界面与合并文档处理。
+- `Sources/Twig/Features/Operations/`：回滚、暂存、推送和历史操作的确认界面。
 - `scripts/build-app.sh`：Release 构建、图标生成和 `.app` 打包。
 
 
