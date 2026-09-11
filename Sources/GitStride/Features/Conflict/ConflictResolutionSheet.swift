@@ -71,11 +71,12 @@ struct ConflictResolutionSheet: View {
         }
         .alert("放弃本次编辑？", isPresented: $confirmClose) {
             Button("继续编辑", role: .cancel) { }
-            Button("放弃编辑", role: .destructive) { dismiss() }
+            Button("放弃编辑", role: .destructive) { dismiss() }.keyboardShortcut(.defaultAction)
         } message: { Text("尚未保存的合并结果会丢失，工作区文件保持不变。") }
         .alert("确认解决此文件？", isPresented: $showResolutionConfirmation) {
             Button("取消", role: .cancel) { pendingResolution = nil }
             Button("确认") { if let pendingResolution { save(pendingResolution, next: continueToNext) } }
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text("此操作作用于整个文件，并覆盖当前面板中的编辑。使用所选一侧的完整版本；若该侧不存在文件，则采用删除。确认后保存并暂存。")
         }
@@ -206,7 +207,7 @@ struct ConflictResolutionSheet: View {
             Button("取消") { if editing.text != original { confirmClose = true } else { dismiss() } }.keyboardShortcut(.cancelAction)
             if document.canEdit {
                 Button(hasNext ? "保存并处理下一个" : "完成") { save(.edited(editing.text), next: true) }
-                    .buttonStyle(.borderedProminent).disabled(!ready)
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!ready)
             }
         }
     }

@@ -375,7 +375,7 @@ final class RepositoryModel: ObservableObject {
 
     func switchBranch(_ name: String, create: Bool = false, confirmed: Bool = false) {
         guard !busy, let state, state.operation == nil else { return }
-        if !create && !confirmed && !state.files.isEmpty {
+        if !create && !confirmed && hasTrackedWorkingTreeChanges(state) {
             confirmation = OperationConfirmation(title: "带着未提交改动切换分支？", message: "将切换到“\(name)”。可保留的改动会带入目标分支；存在覆盖风险时 Git 会阻止切换。") { [weak self] in self?.switchBranch(name, confirmed: true) }
             return
         }
@@ -390,7 +390,7 @@ final class RepositoryModel: ObservableObject {
     func selectBranch(_ branch: GitBranch, confirmed: Bool = false) {
         guard branch.isRemote else { switchBranch(branch.name); return }
         guard !busy, let state, state.operation == nil else { return }
-        if !confirmed && !state.files.isEmpty {
+        if !confirmed && hasTrackedWorkingTreeChanges(state) {
             confirmation = OperationConfirmation(title: "带着未提交改动切换分支？", message: "将切换到远程分支“\(branch.name)”对应的本地分支。可保留的改动会一起带入。") { [weak self] in self?.selectBranch(branch, confirmed: true) }
             return
         }
@@ -399,6 +399,25 @@ final class RepositoryModel: ObservableObject {
             try await self.reload()
             self.notice = "当前分支：\(name)"
         }
+    }
+
+    func checkoutTag(_ tag: GitTag, confirmed: Bool = false) {
+        guard !busy, let state, state.operation == nil else { return }
+        if !confirmed && hasTrackedWorkingTreeChanges(state) {
+            confirmation = OperationConfirmation(title: "带着未提交改动检出 Tag？", message: "将以游离 HEAD 方式检出“\(tag.name)”。可保留的改动会带入该版本；存在覆盖风险时 Git 会阻止切换。") { [weak self] in
+                self?.checkoutTag(tag, confirmed: true)
+            }
+            return
+        }
+        perform("正在检出 Tag…", recover: true) {
+            try await self.git.switchTag(tag, root: state.root)
+            try await self.reload()
+            self.notice = "当前检出 Tag：\(tag.name)"
+        }
+    }
+
+    private func hasTrackedWorkingTreeChanges(_ state: RepositorySnapshot) -> Bool {
+        state.files.contains { !$0.isUntracked }
     }
 
     func createBranch(from branch: GitBranch, named name: String) {

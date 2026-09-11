@@ -73,6 +73,7 @@ struct FileActionSheet: View {
                     model.executeFileAction(request, paths: selected, message: message)
                     dismiss()
                 }.buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(selected.isEmpty || (isStash && message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
             }
         }.padding(24).frame(width: 520)
@@ -117,7 +118,7 @@ struct GraphActionSheet: View {
                 Button("确认 " + action.title, role: action.destructive ? .destructive : nil) {
                     model.executeGraphCommitAction(request, action: action, stashChanges: stashChanges)
                     dismiss()
-                }.buttonStyle(.borderedProminent).disabled(model.busy)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(model.busy)
             }
         }.padding(24).frame(width: 510)
     }
@@ -178,7 +179,7 @@ struct PushReviewSheet: View {
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(request.message == nil ? "推送" : "提交并推送") {
                     model.executePushReview(request); dismiss()
-                }.buttonStyle(.borderedProminent).disabled(loading || error != nil || model.busy)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(loading || error != nil || model.busy)
             }
         }.padding(24).frame(width: 560)
             .task {

@@ -143,13 +143,19 @@ actor GitService {
                 remoteBranches.append(GitBranch(ref: ref, oid: fields[3], name: name, remote: remoteName, upstream: "", ahead: 0, behind: 0))
             }
         }
+        let tagRefs = try run(["for-each-ref", "--sort=-version:refname", "--format=%(refname)%00%(objectname)", "refs/tags"], at: root).text
+        let remoteTags = tagRefs.split(separator: "\n").compactMap { line -> GitTag? in
+            let fields = line.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
+            guard fields.count == 2, fields[0].hasPrefix("refs/tags/") else { return nil }
+            return GitTag(ref: fields[0], oid: fields[1], name: String(fields[0].dropFirst("refs/tags/".count)))
+        }
         var operation: String?
         for (marker, label) in [("MERGE_HEAD", "合并"), ("rebase-merge", "变基"), ("rebase-apply", "变基"), ("CHERRY_PICK_HEAD", "挑选提交"), ("REVERT_HEAD", "撤销提交")] {
             let path = try run(["rev-parse", "--git-path", marker], at: root).text.trimmingCharacters(in: .newlines)
             let location = path.hasPrefix("/") ? URL(fileURLWithPath: path) : root.appendingPathComponent(path)
             if FileManager.default.fileExists(atPath: location.path) { operation = label; break }
         }
-        return RepositorySnapshot(root: root, branch: branch, localBranches: localBranches, remoteBranches: remoteBranches, files: files, ahead: ahead, behind: behind, upstream: upstream, remote: remote, headOID: headOID, hasHEAD: head, detached: symbolic.code != 0, operation: operation)
+        return RepositorySnapshot(root: root, branch: branch, localBranches: localBranches, remoteBranches: remoteBranches, remoteTags: remoteTags, files: files, ahead: ahead, behind: behind, upstream: upstream, remote: remote, headOID: headOID, hasHEAD: head, detached: symbolic.code != 0, operation: operation)
     }
 
     func applyGraphCommitAction(_ action: GraphCommitAction, commit: GraphCommit, expected: RepositorySnapshot, stashChanges: Bool = false) throws {
@@ -465,7 +471,13 @@ actor GitService {
         }
         let count = limit + 1
         var arguments = ["log", sort.argument, "--decorate=short", "--no-color", "--max-count=\(count)", "--skip=\(offset)", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%D%x00%s%x00%B%x1e"]
-        if scope == .allBranches { arguments.append("--all") } else { arguments.append("HEAD") }
+        if scope == .allBranches {
+            // `--all` also expands refs/stash, which would add stash-only commits
+            // and their connections to the branch graph.
+            arguments += ["--exclude=refs/stash", "--all"]
+        } else {
+            arguments.append("HEAD")
+        }
         let result = try run(arguments, at: root, allowFailure: true)
         if result.code != 0 {
             let detail = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -496,6 +508,7 @@ actor GitService {
     private func parseGraphReferences(_ decorations: String) -> [GraphReference] {
         decorations.split(separator: ",").compactMap { raw in
             let value = raw.trimmingCharacters(in: .whitespaces)
+            if value == "refs/stash" || value.hasPrefix("stash@{") { return nil }
             if value.hasPrefix("HEAD -> ") { return GraphReference(name: String(value.dropFirst(8)), kind: .head) }
             if value.hasPrefix("tag: ") { return GraphReference(name: String(value.dropFirst(5)), kind: .tag) }
             if value.contains("/") { return GraphReference(name: value, kind: .remote) }
@@ -632,6 +645,14 @@ actor GitService {
         guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }
         try run(["check-ref-format", "--branch", name], at: root)
         try run(create ? ["switch", "-c", name] : ["switch", "--", name], at: root)
+    }
+    func switchTag(_ tag: GitTag, root: URL) throws {
+        let current = try snapshot(root)
+        guard current.operation == nil,
+              current.remoteTags.contains(where: { $0.ref == tag.ref && $0.oid == tag.oid }) else {
+            throw GitFailure(message: "远程 Tag 已变化，请刷新后重新选择。")
+        }
+        try run(["switch", "--detach", tag.ref], at: root)
     }
     func createBranch(_ name: String, from startPoint: String, root: URL) throws {
         guard !name.hasPrefix("-"), !name.isEmpty else { throw GitFailure(message: "请输入有效的分支名称。") }

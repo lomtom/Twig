@@ -22,6 +22,15 @@ struct GitBranch: Identifiable, Equatable {
     }
 }
 
+/// Tags fetched from the repository's remotes. Git stores fetched tags in
+/// `refs/tags`, rather than under a separate remote-tracking namespace.
+struct GitTag: Identifiable, Equatable {
+    let ref: String
+    let oid: String
+    let name: String
+    var id: String { ref }
+}
+
 struct BranchTreeNode: Identifiable {
     let path: String
     let name: String

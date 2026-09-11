@@ -279,6 +279,8 @@ private struct BranchSwitcher: View {
                         branchSection("Local Branches", branches: state.localBranches, current: state.branch, id: "local")
                         Divider().padding(.vertical, 4)
                         branchSection("Remote Branches", branches: state.remoteBranches, current: state.branch, id: "remote")
+                        Divider().padding(.vertical, 4)
+                        tagSection("Remote Tags", tags: state.remoteTags)
                     }
                 }
             }
@@ -353,6 +355,42 @@ private struct BranchSwitcher: View {
         case .mergeInto:
             isPresented = false
             model.mergeBranchIntoCurrent(branch)
+        }
+    }
+
+    private func tagSection(_ title: String, tags: [GitTag]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+            if tags.isEmpty {
+                Text("暂无远程 Tag")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+            }
+            ForEach(tags) { tag in
+                Menu {
+                    Button("Checkout \(tag.name)") {
+                        isPresented = false
+                        model.checkoutTag(tag)
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Color.clear.frame(width: 12, height: 18)
+                        Image(systemName: "tag").frame(width: 12)
+                        Text(tag.name).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .contentShape(Rectangle())
+                }
+                .help(tag.name)
+            }
         }
     }
 }

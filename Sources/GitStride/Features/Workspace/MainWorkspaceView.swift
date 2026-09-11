@@ -99,6 +99,7 @@ struct MainWorkspaceView: View {
         .alert(model.confirmation?.title ?? "确认操作", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.confirmation = nil } }), presenting: model.confirmation) { request in
             Button("取消", role: .cancel) { model.confirmation = nil }
             Button("确认", role: request.destructive ? .destructive : nil) { model.confirmation = nil; request.action() }
+                .keyboardShortcut(.defaultAction)
         } message: { request in Text(request.message) }
         .sheet(isPresented: $model.showClone) { CloneSheet().environmentObject(model) }
         .sheet(isPresented: $model.showBranch) { BranchSheet().environmentObject(model) }

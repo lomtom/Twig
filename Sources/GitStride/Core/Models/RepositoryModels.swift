@@ -35,6 +35,7 @@ struct RepositorySnapshot: Equatable {
     let branch: String
     let localBranches: [GitBranch]
     let remoteBranches: [GitBranch]
+    let remoteTags: [GitTag]
     let files: [ChangedFile]
     let ahead: Int
     let behind: Int
