@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1615">
+  <title>Twig — 让 Git 回到专注本身</title>
+  <style>
+    :root { --ink:#ebf5f2; --muted:#9db1ac; --line:rgba(210,237,228,.12); --panel:rgba(19,35,32,.76); --mint:#79c5ae; --mint-bright:#b4ebd5; --canvas:#0d1615; --orange:#f5b96b; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; background:var(--canvas); }
+    body { margin:0; color:var(--ink); background:radial-gradient(900px 600px at 84% -5%,rgba(70,133,113,.25),transparent 65%), radial-gradient(720px 440px at 5% 38%,rgba(38,104,85,.15),transparent 70%), var(--canvas); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC","Microsoft YaHei",sans-serif; letter-spacing:.01em; }
+    a { color:inherit; text-decoration:none; }
+    .wrap { width:min(1160px,calc(100% - 40px)); margin:0 auto; }
+    .nav { height:78px; display:flex; justify-content:space-between; align-items:center; position:relative; z-index:2; }
+    .brand { display:flex; align-items:center; gap:10px; font-size:19px; font-weight:720; letter-spacing:-.04em; }
+    .mark { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; color:#10231e; background:linear-gradient(145deg,#c9f0dd,#70bb9f); box-shadow:0 8px 22px rgba(73,178,141,.24); }
+    .nav-links { display:flex; gap:26px; color:var(--muted); font-size:13px; }
+    .nav-links a:hover { color:var(--ink); }
+    .hero { min-height:640px; display:grid; grid-template-columns:.92fr 1.08fr; align-items:center; gap:52px; padding:75px 0 88px; }
+    .eyebrow { display:flex; align-items:center; gap:8px; color:var(--mint-bright); text-transform:uppercase; font-size:11px; font-weight:700; letter-spacing:.13em; }
+    .eyebrow i { width:7px; height:7px; background:var(--mint); border-radius:50%; box-shadow:0 0 18px var(--mint); }
+    h1 { max-width:600px; margin:20px 0; font-size:clamp(45px,5.7vw,74px); line-height:1.05; letter-spacing:-.07em; font-weight:700; }
+    h1 em { color:var(--mint-bright); font-style:normal; }
+    .lead { max-width:470px; margin:0; color:var(--muted); font-size:17px; line-height:1.8; }
+    .actions { display:flex; gap:11px; margin-top:31px; }
+    .button { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:43px; padding:0 18px; border:1px solid var(--line); border-radius:11px; font-size:14px; font-weight:620; transition:transform .2s,background .2s,border-color .2s; }
+    .button:hover { transform:translateY(-2px); border-color:rgba(180,235,213,.46); }
+    .button.primary { color:#113126; background:linear-gradient(135deg,#bdebd7,#76c8aa); border:0; box-shadow:0 12px 28px rgba(65,173,135,.24); }
+    .button.secondary { color:var(--ink); background:rgba(255,255,255,.03); }
+    .microcopy { margin:13px 0 0; color:#6d837d; font-size:12px; }
+    .app-window { position:relative; width:100%; min-height:405px; padding:13px; border:1px solid rgba(205,245,228,.17); border-radius:20px; background:linear-gradient(145deg,rgba(40,66,60,.86),rgba(14,27,24,.92)); box-shadow:0 38px 75px rgba(0,0,0,.33), inset 0 1px rgba(255,255,255,.08); transform:perspective(1200px) rotateY(-5deg) rotateX(2deg); animation:float 6s ease-in-out infinite; }
+    @keyframes float { 50% { transform:perspective(1200px) rotateY(-4deg) rotateX(1deg) translateY(-9px); } }
+    .chrome { height:29px; display:flex; align-items:center; justify-content:space-between; padding:0 5px 10px; }
+    .dots { display:flex; gap:6px; } .dots b { width:10px; height:10px; border-radius:50%; background:#ff5f57; } .dots b:nth-child(2){background:#febc2e}.dots b:nth-child(3){background:#28c840}
+    .chrome span { color:#a6bbb5; font-size:11px; font-weight:650; }
+    .app { height:348px; overflow:hidden; display:grid; grid-template-columns:128px 1fr; border:1px solid rgba(225,255,245,.08); border-radius:11px; background:#10201d; }
+    .side { padding:16px 9px; background:#162723; border-right:1px solid rgba(225,255,245,.07); font-size:10px; color:#9db0aa; }
+    .side h5 { margin:2px 6px 12px; font-size:9px; color:#7f958e; letter-spacing:.08em; }
+    .repo, .navitem { display:flex; align-items:center; gap:7px; padding:7px 7px; border-radius:6px; margin-bottom:2px; } .repo { color:#edf9f5; font-weight:650; } .navitem.active { color:white; background:#218aeb; } .navitem span:first-child { opacity:.72; }
+    .work { padding:12px; display:grid; grid-template-columns:155px 1fr; gap:10px; background:#0e1b18; }
+    .changes { border-radius:9px; padding:10px; background:#162723; } .changes h4 { margin:0 0 12px; color:#eaf5f2; font-size:10px; } .file { display:flex; gap:6px; color:#a4b9b2; padding:5px 0; font-size:9px; } .file::before { content:""; width:7px; height:7px; margin-top:2px; border-radius:2px; background:#6fc6a8; }
+    .empty { display:grid; place-content:center; text-align:center; color:#91aaa2; } .empty strong { display:block; margin:12px 0 6px; color:#e8f5f0; font-size:17px; } .seal { margin:auto; width:40px; height:40px; display:grid; place-items:center; border:2px solid #7ec3ab; border-radius:13px; font-size:21px; color:#92d9c0; }
+    .caption { position:absolute; right:16px; bottom:15px; color:#b0c4bd; font-size:10px; }
+    .signal { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .signal div { padding:30px 22px; border-left:1px solid var(--line); } .signal div:last-child { border-right:1px solid var(--line); } .signal strong { display:block; font-size:26px; letter-spacing:-.06em; color:var(--mint-bright); } .signal span { display:block; margin-top:7px; color:var(--muted); font-size:13px; }
+    .principle { display:grid; grid-template-columns:210px 1fr; gap:36px; align-items:center; margin:42px 0 -8px; padding:28px 31px; border:1px solid rgba(180,235,213,.16); border-radius:17px; background:linear-gradient(105deg,rgba(68,127,107,.16),rgba(27,46,41,.42)); }
+    .ratio { font-size:43px; font-weight:730; line-height:.92; letter-spacing:-.08em; color:var(--mint-bright); } .ratio small { display:block; margin-top:11px; color:#91ada4; font-size:11px; font-weight:650; letter-spacing:.12em; }
+    .principle b { display:block; margin-bottom:8px; font-size:17px; letter-spacing:-.03em; } .principle p { margin:0; color:var(--muted); font-size:14px; line-height:1.72; }
+    section { padding:114px 0; } .section-head { max-width:600px; margin-bottom:48px; } h2 { margin:12px 0; font-size:clamp(31px,4vw,48px); line-height:1.12; letter-spacing:-.055em; } .section-head p { color:var(--muted); font-size:16px; line-height:1.75; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; } .card { min-height:228px; padding:25px; border:1px solid var(--line); border-radius:17px; background:linear-gradient(150deg,rgba(34,57,51,.65),rgba(18,31,28,.63)); transition:transform .22s,border-color .22s; } .card:hover { transform:translateY(-5px); border-color:rgba(180,235,213,.34); } .icon { width:39px; height:39px; display:grid; place-items:center; margin-bottom:27px; color:var(--mint-bright); border-radius:11px; background:rgba(125,202,173,.12); font-size:19px; } .card h3 { margin:0 0 9px; font-size:17px; letter-spacing:-.03em; } .card p { margin:0; color:var(--muted); font-size:13px; line-height:1.7; }
+    .workflow { display:grid; grid-template-columns:1fr 1.12fr; gap:60px; align-items:center; border-top:1px solid var(--line); } .steps { display:grid; gap:4px; } .step { display:grid; grid-template-columns:38px 1fr; gap:12px; padding:16px 0; border-bottom:1px solid var(--line); } .number { color:var(--mint); font:700 13px ui-monospace,SFMono-Regular,Menlo,monospace; } .step b { font-size:15px; } .step p { margin:5px 0 0; color:var(--muted); font-size:13px; line-height:1.55; }
+    .graph { min-height:320px; padding:22px; border:1px solid var(--line); border-radius:18px; background:#13231f; overflow:hidden; } .graph-top { display:flex; gap:8px; align-items:center; color:#adc4bc; font-size:11px; } .search { flex:1; padding:8px 10px; border-radius:7px; background:#0c1714; color:#758c84; } .commit { display:grid; grid-template-columns:70px 1fr auto; align-items:center; min-height:52px; border-bottom:1px solid rgba(219,244,234,.075); font-size:11px; } .lanes { height:100%; position:relative; background:linear-gradient(90deg,transparent 28%,#68bea1 28% 30%,transparent 30% 50%,#f2bb70 50% 52%,transparent 52% 72%,#9c88df 72% 74%,transparent 74%); opacity:.8; } .commit b { font-size:12px; } .commit span { color:#91a8a0; } .tag { padding:4px 7px; border-radius:5px; background:rgba(121,197,174,.15); color:#aee6d1; font-size:9px; }
+    .callout { position:relative; padding:88px 0 120px; text-align:center; overflow:hidden; } .callout::before { content:""; position:absolute; width:660px; height:330px; left:50%; top:5px; transform:translateX(-50%); background:radial-gradient(ellipse,rgba(73,164,132,.2),transparent 68%); pointer-events:none; } .callout > * { position:relative; } .callout h2 { max-width:620px; margin:14px auto 17px; } .callout p { max-width:450px; margin:0 auto 27px; color:var(--muted); line-height:1.7; }
+    footer { display:flex; justify-content:space-between; padding:25px 0 34px; border-top:1px solid var(--line); color:#769088; font-size:12px; }
+    @media (max-width:820px) { .nav-links{display:none}.hero,.workflow,.principle{grid-template-columns:1fr;gap:24px}.hero{padding-top:52px}.app-window{max-width:620px;margin:auto}.grid{grid-template-columns:1fr}.signal{grid-template-columns:1fr}.signal div{border-right:1px solid var(--line);border-bottom:1px solid var(--line)}section{padding:75px 0}.workflow{padding-top:75px}.work{grid-template-columns:120px 1fr}.app{grid-template-columns:102px 1fr}.side{font-size:9px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav">
+      <a class="brand" href="#top"><span class="mark">⌘</span><span>Twig</span></a>
+      <div class="nav-links"><a href="#features">功能</a><a href="#workflow">工作流</a><a href="https://github.com/lomtom/Twig" target="_blank" rel="noreferrer">GitHub ↗</a></div>
+    </nav>
+    <main id="top">
+      <section class="hero">
+        <div>
+          <div class="eyebrow"><i></i> Native Git for macOS</div>
+          <h1>让每一次改动，<em>清晰有序。</em></h1>
+          <p class="lead">Twig 是一款原生 macOS Git 工具。它收起复杂的配置与术语，只留下你日常真正需要的提交、分支、暂存与历史。</p>
+          <div class="actions"><a class="button primary" href="https://github.com/lomtom/Twig/releases/download/v0.1.0/Twig-v0.1.0-arm64.zip">下载 macOS 版 <span>↓</span></a><a class="button secondary" href="https://github.com/lomtom/Twig" target="_blank" rel="noreferrer">访问 GitHub ↗</a></div>
+          <p class="microcopy">系统 Git · 无第三方依赖 · 支持 macOS 14+</p>
+        </div>
+        <div class="app-window" aria-label="Twig 应用界面预览">
+          <div class="chrome"><div class="dots"><b></b><b></b><b></b></div><span>Twig</span><span>⌘</span></div>
+          <div class="app"><aside class="side"><h5>仓库</h5><div class="repo">◈ &nbsp; Twig</div><div class="repo">⌘ &nbsp; main</div><h5 style="margin-top:20px">工作区</h5><div class="navitem active"><span>✓</span> Commit</div><div class="navitem"><span>▱</span> Stash</div><div class="navitem"><span>⌘</span> Graph</div></aside><div class="work"><div class="changes"><h4>改动的文件 <span style="float:right">3</span></h4><div class="file">WorkspaceView.swift</div><div class="file">GitService.swift</div><div class="file">README.md</div></div><div class="empty"><div class="seal">✓</div><strong>一切井然有序</strong><span>选择文件，写下这次改了什么。</span></div></div></div>
+          <span class="caption">原生 SwiftUI 界面</span>
+        </div>
+      </section>
+      <div class="signal"><div><strong>Commit</strong><span>只提交你选中的改动</span></div><div><strong>Stash</strong><span>暂存与恢复，始终可控</span></div><div><strong>Graph</strong><span>看清每条分支的来处</span></div></div>
+      <aside class="principle"><div class="ratio">20%<small>FEATURES · 80% DAILY WORK</small></div><div><b>只保留日常真正会用到的 20% 功能。</b><p>提交、分支、暂存、同步和提交图，覆盖大多数开发日的 80% Git 场景。其余少见或高风险的操作，Twig 不用堆叠按钮假装简单——需要时，仍可放心交给终端。</p></div></aside>
+      <section id="features"><div class="section-head"><div class="eyebrow"><i></i> Focused by design</div><h2>少一点 Git 焦虑，多一点专注。</h2><p>从工作区到提交历史，每一个界面只服务于当前任务。复杂能力仍在，但不会抢走你的注意力。</p></div><div class="grid"><article class="card"><div class="icon">⌘</div><h3>干净的工作区</h3><p>已跟踪和未跟踪文件清晰分组。完整源文件差异、行号与改动跳转，让每次提交都有据可依。</p></article><article class="card"><div class="icon">⌥</div><h3>安心地处理冲突</h3><p>三栏比对当前版本、合并结果和传入版本。按冲突逐处处理，同时保留手动编辑的自由。</p></article><article class="card"><div class="icon">⌁</div><h3>读懂提交历史</h3><p>拓扑提交图、分支引用、提交人和文件变更集中呈现。搜索、筛选与历史操作触手可及。</p></article></div></section>
+      <section id="workflow" class="workflow"><div><div class="eyebrow"><i></i> A calmer workflow</div><h2>从改动到远程，顺着完成工作。</h2><p class="lead">Twig 不替你做决定。它在关键步骤给出足够的信息和确认，让 Git 的状态始终可预测。</p></div><div><div class="steps"><div class="step"><span class="number">01</span><div><b>查看改动</b><p>按文件浏览，定位每一处增删；只勾选准备提交的内容。</p></div></div><div class="step"><span class="number">02</span><div><b>写下提交说明</b><p>调用历史说明，完成 Commit，或在确认后一次提交并推送。</p></div></div><div class="step"><span class="number">03</span><div><b>保持分支同步</b><p>获取、仅快进拉取、推送。需要处理分叉时，Twig 会如实告诉你。</p></div></div></div><div class="graph" style="margin-top:22px"><div class="graph-top"><span class="search">Search commits, branches, or SHA</span><span>All Branches</span></div><div class="commit"><i class="lanes"></i><div><b>refine branch switching workflow</b><br><span>Today · you</span></div><span class="tag">main</span></div><div class="commit"><i class="lanes"></i><div><b>improve conflict resolution</b><br><span>Yesterday · you</span></div><span class="tag">origin/main</span></div><div class="commit"><i class="lanes"></i><div><b>make Git feel simpler</b><br><span>Sep 08 · you</span></div><span class="tag">v1.0.0</span></div></div></div></section>
+      <section id="start" class="callout"><div class="eyebrow" style="justify-content:center"><i></i> Built for the everyday</div><h2>Git 的力量，不必以复杂为代价。</h2><p>打开一个仓库，让每一次改动都清晰有序。Twig 使用你已有的 Git 配置、凭据助手和 SSH agent。</p><div class="actions" style="justify-content:center"><a class="button primary" href="https://github.com/lomtom/Twig/releases/download/v0.1.0/Twig-v0.1.0-arm64.zip">下载 Twig for macOS <span>↓</span></a><a class="button secondary" href="https://github.com/lomtom/Twig" target="_blank" rel="noreferrer">在 GitHub 查看源码 ↗</a></div></section>
+    </main>
+    <footer><span>© Twig · Native Git for macOS</span><a href="https://github.com/lomtom/Twig" target="_blank" rel="noreferrer">GitHub · Made for focused work. ↗</a></footer>
+  </div>
+</body>
+</html>
