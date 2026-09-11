@@ -311,7 +311,10 @@ actor GitService {
             guard !patchData.contains(0), let patch = String(data: patchData, encoding: .utf8) else {
                 return .message("二进制文件或非 UTF-8 文本，无法显示源文件。")
             }
-            if let preview = SourcePreview.patch(patch) { return preview }
+            if var preview = SourcePreview.patch(patch) {
+                preview.rollback = try rollbackContext(file, state: state, preview: preview)
+                return preview
+            }
         }
         guard FileManager.default.fileExists(atPath: url.path) else { return .message("文件已删除，且没有可预览的文本内容。") }
         let data = try Data(contentsOf: url)
@@ -321,6 +324,100 @@ actor GitService {
         let added = file.isUntracked || !state.hasHEAD || file.index == "A"
         return .source(content, added: added,
                        notice: content.isEmpty ? "空文件" : (added ? nil : "没有文本改动，显示完整源文件。"))
+    }
+
+    private func rollbackContext(_ file: ChangedFile, state: RepositorySnapshot, preview: SourcePreview) throws -> SourceRollbackContext? {
+        guard state.operation == nil, !file.isConflict, !file.isUntracked, file.previousPath == nil,
+              let head = state.headOID else { return nil }
+        let url = state.root.appendingPathComponent(file.path)
+        let root = state.root.resolvingSymlinksInPath().path
+        let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+        guard parent == root || parent.hasPrefix(root + "/"),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let data = try? Data(contentsOf: url), !data.contains(0), data.count <= 2_000_000 else { return nil }
+        let displayed = preview.lines.filter { $0.kind != .removed }.map(\.content).joined()
+        guard Data(displayed.utf8) == data else { return nil } // Includes truncation and concurrent-edit checks.
+        let original = preview.lines.filter { $0.kind != .added }.map(\.content).joined()
+        let originalBlob = try run(["cat-file", "-p", head + ":" + file.path], at: state.root, allowFailure: true)
+        guard originalBlob.code == 0, originalBlob.output == Data(original.utf8) else { return nil }
+        let entry = try run(["ls-files", "--stage", "-z", "--", file.path], at: state.root).output
+        guard let parsed = rollbackIndexEntry(entry), parsed.mode.hasPrefix("100") else { return nil }
+        return SourceRollbackContext(expected: state, file: file, worktree: data, indexEntry: entry, original: original)
+    }
+
+    private func rollbackIndexEntry(_ data: Data) -> (mode: String, oid: String)? {
+        let entries = data.split(separator: 0)
+        guard entries.count == 1, let tab = entries[0].firstIndex(of: 9) else { return nil }
+        let fields = String(decoding: entries[0][..<tab], as: UTF8.self).split(separator: " ")
+        guard fields.count == 3, fields[2] == "0" else { return nil }
+        return (String(fields[0]), String(fields[1]))
+    }
+
+    func rollbackChange(_ change: SourceChange, context: SourceRollbackContext) throws {
+        let root = context.expected.root, file = context.file
+        let current = try snapshot(root)
+        guard current.headOID == context.expected.headOID, current.branch == context.expected.branch,
+              current.operation == nil, current.files.first(where: { $0.path == file.path }) == file else {
+            throw GitFailure(message: "仓库或文件状态已改变，请刷新后重新选择需要回滚的改动。")
+        }
+        let fresh = try sourcePreview(file, in: current)
+        guard fresh.rollback == context, fresh.changes.contains(change),
+              let entry = rollbackIndexEntry(context.indexEntry),
+              let worktree = String(data: context.worktree, encoding: .utf8) else {
+            throw GitFailure(message: "文件或暂存区已改变，请重新查看差异后再回滚。")
+        }
+        let indexSize = try run(["cat-file", "-s", entry.oid], at: root).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let size = Int(indexSize), size <= 2_000_000 else { throw GitFailure(message: "暂存版本过大，无法局部回滚。") }
+        let indexData = try run(["cat-file", "-p", entry.oid], at: root).output
+        guard !indexData.contains(0), let indexText = String(data: indexData, encoding: .utf8) else {
+            throw GitFailure(message: "暂存版本不是 UTF-8 文本，无法局部回滚。")
+        }
+        let mapping = ConflictLineMap(source: indexText, result: context.original)
+        for block in mapping.blocks {
+            let intersects: Bool
+            if change.oldLines.isEmpty {
+                intersects = block.result.isEmpty ? block.result.lowerBound == change.oldLines.lowerBound :
+                    block.result.contains(change.oldLines.lowerBound)
+            } else {
+                intersects = block.result.isEmpty ? change.oldLines.contains(block.result.lowerBound) :
+                    block.result.overlaps(change.oldLines)
+            }
+            if intersects && (block.result.lowerBound < change.oldLines.lowerBound || block.result.upperBound > change.oldLines.upperBound) {
+                throw GitFailure(message: "此处暂存改动与其他片段重叠，无法单独回滚。请先调整暂存内容后重试。")
+            }
+        }
+        let indexRange = mapping.sourceRange(forLines: change.oldLines)
+        let newIndex = Data((indexText as NSString).replacingCharacters(in: indexRange, with: change.original).utf8)
+        let newWorktree = Data((worktree as NSString).replacingCharacters(in: change.worktreeRange, with: change.original).utf8)
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try newIndex.write(to: temporary)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let oid = try run(["hash-object", "-w", "--", temporary.path], at: root).text.trimmingCharacters(in: .newlines)
+        let url = root.appendingPathComponent(file.path)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              try Data(contentsOf: url) == context.worktree,
+              try run(["ls-files", "--stage", "-z", "--", file.path], at: root).output == context.indexEntry else {
+            throw GitFailure(message: "文件或暂存区已被外部修改，已取消回滚。")
+        }
+        try newWorktree.write(to: url, options: .atomic)
+        do {
+            if let permissions = attributes[.posixPermissions] {
+                try FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+            }
+            if newIndex != indexData {
+                try run(["update-index", "--cacheinfo", entry.mode, oid, file.path], at: root)
+            }
+        } catch {
+            if (try? Data(contentsOf: url)) == newWorktree {
+                try? context.worktree.write(to: url, options: .atomic)
+                if let permissions = attributes[.posixPermissions] {
+                    try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+                }
+            }
+            throw error
+        }
     }
 
     func recentCommitMessages(root: URL) throws -> [RecentCommitMessage] {

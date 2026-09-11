@@ -7,12 +7,15 @@ struct SourceLine: Identifiable, Equatable {
     let oldNumber: Int?
     let newNumber: Int?
     let kind: Kind
+    var hasNewline = true
+    var content: String { text + (hasNewline ? "\n" : "") }
 }
 
 struct SourcePreview {
     var id = UUID()
     let lines: [SourceLine]
     let notice: String?
+    var rollback: SourceRollbackContext? = nil
     var additions: Int { lines.filter { $0.kind == .added }.count }
     var deletions: Int { lines.filter { $0.kind == .removed }.count }
 
@@ -45,7 +48,11 @@ struct SourcePreview {
             }
             if line.hasPrefix("diff --git ") { inHunk = false; continue }
             guard inHunk, let prefix = line.first else { continue }
-            if prefix == "\\" { missingNewline = true; continue }
+            if prefix == "\\" {
+                missingNewline = true
+                if !rows.isEmpty { rows[rows.count - 1].hasNewline = false }
+                continue
+            }
             let kind: SourceLine.Kind
             let left: Int?, right: Int?
             switch prefix {

@@ -6,6 +6,7 @@ struct MainWorkspaceView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var destination: WorkspaceDestination? = .commit
     @State private var commandPressed = false
+    @State private var workspaceSize = CGSize(width: 1200, height: 790)
     @State private var environmentStatus: GitEnvironmentStatus?
 
     private var mainContent: some View {
@@ -62,11 +63,12 @@ struct MainWorkspaceView: View {
                             if commandPressed { KeyboardShortcutHint(keys: "⌘⇧K") }
                         }
                     }.labelStyle(.titleAndIcon).disabled(!model.canSync || !state.hasHEAD || (state.upstream == nil && state.remote == nil)).help(state.upstream == nil ? "推送并设置同名上游分支" : "推送当前分支")
-                    Menu {
-                        Button("Refresh Local Status", action: { model.refresh() })
-                        Button("Show in Finder", action: model.revealRepository)
-                        Button("Open in Terminal", action: model.openTerminal)
-                    } label: { Image(systemName: "ellipsis.circle") }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(action: model.revealRepository) { Label("Finder", systemImage: "folder") }
+                        .labelStyle(.titleAndIcon).help("在 Finder 中打开仓库")
+                    Button(action: model.openTerminal) { Label("Terminal", systemImage: "terminal") }
+                        .labelStyle(.titleAndIcon).help("在终端中打开仓库")
                 }
             }
         }
@@ -86,9 +88,13 @@ struct MainWorkspaceView: View {
 
     private var presentedContent: some View {
         mainContent
+        .background(GeometryReader { geometry in
+            Color.clear.onAppear { workspaceSize = geometry.size }
+                .onChange(of: geometry.size) { _, size in workspaceSize = size }
+        })
         .sheet(item: $model.graphAction) { request in GraphActionSheet(request: request).environmentObject(model) }
         .sheet(item: $model.pushReview) { request in PushReviewSheet(request: request).environmentObject(model) }
-        .sheet(item: $model.conflictRequest) { request in ConflictResolutionSheet(request: request).environmentObject(model) }
+        .sheet(item: $model.conflictRequest) { request in ConflictResolutionSheet(request: request, initialSize: workspaceSize).environmentObject(model) }
         .sheet(item: $model.fileAction) { request in FileActionSheet(request: request).environmentObject(model) }
         .alert(model.confirmation?.title ?? "确认操作", isPresented: Binding(get: { model.confirmation != nil }, set: { if !$0 { model.confirmation = nil } }), presenting: model.confirmation) { request in
             Button("取消", role: .cancel) { model.confirmation = nil }
@@ -356,12 +362,6 @@ struct MainWorkspaceView: View {
     private func changesList(_ state: RepositorySnapshot) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 16) {
-                Button { model.refresh() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                        if commandPressed { KeyboardShortcutHint(keys: "⌘R") }
-                    }
-                }.help("刷新本地状态 ⌘R").disabled(model.busy)
                 Button { model.requestFileAction(.rollback) } label: { Image(systemName: "arrow.uturn.backward") }.help("回滚所选文件").disabled(!model.canChangeFiles)
                 Button { model.requestFileAction(.stash) } label: { Image(systemName: "archivebox") }.help("暂存所选文件到 Git Stash").disabled(!model.canChangeFiles || !state.hasHEAD)
                 Spacer(minLength: 0)
@@ -373,8 +373,11 @@ struct MainWorkspaceView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 4) {
-                        fileSection("改动的文件", files: state.files.filter { !$0.isUntracked }, state: state)
-                        fileSection("非版本控制文件", files: state.files.filter(\.isUntracked), state: state)
+                        if state.files.contains(where: \.isConflict) {
+                            fileSection("冲突文件", files: state.files.filter(\.isConflict), state: state)
+                        }
+                        fileSection("改动的文件", files: state.files.filter { !$0.isUntracked && !$0.isConflict }, state: state)
+                        fileSection("非版本控制文件", files: state.files.filter { $0.isUntracked && !$0.isConflict }, state: state)
                     }.padding(.vertical, 8)
                 }.onChange(of: model.focusedFile) { _, path in if let path { proxy.scrollTo(path) } }
             }.dashboardPanel()
@@ -453,7 +456,8 @@ struct MainWorkspaceView: View {
                 Button("Resolve Conflicts") { model.openConflict(file) }.buttonStyle(.borderedProminent).disabled(model.busy)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let preview = model.sourcePreview {
-            SourceFileView(preview: preview, file: file, moveFile: model.moveFocusedFile)
+            SourceFileView(preview: preview, file: file, moveFile: model.moveFocusedFile,
+                rollbackChange: model.busy || model.loadingDiff || preview.rollback == nil ? nil : { model.requestChangeRollback($0, preview: preview) })
                 .overlay(alignment: .topTrailing) { if model.loadingDiff { ProgressView().controlSize(.small).padding(14) } }
         } else if model.loadingDiff {
             ProgressView("正在读取源文件…").frame(maxWidth: .infinity, maxHeight: .infinity)

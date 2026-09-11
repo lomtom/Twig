@@ -276,7 +276,7 @@ final class RepositoryModel: ObservableObject {
                 var preview = try await git.sourcePreview(file, in: snapshot)
                 guard !Task.isCancelled, diffGeneration == generation else { return }
                 if keepingPreview, previewFilePath == file.path, let existing = sourcePreview { preview.id = existing.id }
-                if !keepingPreview || previewFilePath != file.path || sourcePreview?.lines != preview.lines || sourcePreview?.notice != preview.notice {
+                if !keepingPreview || previewFilePath != file.path || sourcePreview?.lines != preview.lines || sourcePreview?.notice != preview.notice || sourcePreview?.rollback != preview.rollback {
                     sourcePreview = preview
                 }
                 previewFilePath = file.path
@@ -459,6 +459,21 @@ final class RepositoryModel: ObservableObject {
     var selectedFiles: [ChangedFile] { state?.files.filter { selectedPaths.contains($0.path) } ?? [] }
     var canChangeFiles: Bool {
         !busy && !selectedFiles.isEmpty && state?.operation == nil && state?.files.contains(where: \.isConflict) == false
+    }
+
+    func requestChangeRollback(_ change: SourceChange, preview: SourcePreview) {
+        guard !busy, !loadingDiff, let context = preview.rollback,
+              state?.root == context.expected.root, focusedFile == context.file.path else { return }
+        confirmation = OperationConfirmation(title: "回滚此处改动？",
+            message: "将 \(context.file.path) 的这一处改动恢复到 HEAD，同时移除对应暂存内容。其他改动保留。此操作会丢弃该处未提交的内容。",
+            destructive: true) { [weak self] in
+                guard let self, self.state?.root == context.expected.root else { return }
+                self.perform("正在回滚此处改动…", recover: true) {
+                    try await self.git.rollbackChange(change, context: context)
+                    self.notice = "已回滚此处改动：" + context.file.path
+                    try await self.reload()
+                }
+            }
     }
 
     func requestFileAction(_ kind: FileActionRequest.Kind, files: [ChangedFile]? = nil) {
@@ -662,8 +677,9 @@ final class RepositoryModel: ObservableObject {
 
     func moveFocusedFile(_ step: Int) {
         guard let state else { return }
-        let ordered = ChangeTreeNode.build(state.files.filter { !$0.isUntracked }).flatMap(\.files) +
-            ChangeTreeNode.build(state.files.filter(\.isUntracked)).flatMap(\.files)
+        let ordered = ChangeTreeNode.build(state.files.filter(\.isConflict)).flatMap(\.files) +
+            ChangeTreeNode.build(state.files.filter { !$0.isUntracked && !$0.isConflict }).flatMap(\.files) +
+            ChangeTreeNode.build(state.files.filter { $0.isUntracked && !$0.isConflict }).flatMap(\.files)
         guard !ordered.isEmpty else { return }
         let index = ordered.firstIndex { $0.path == focusedFile } ?? (step > 0 ? -1 : ordered.count)
         focusedFile = ordered[min(max(index + step, 0), ordered.count - 1)].path

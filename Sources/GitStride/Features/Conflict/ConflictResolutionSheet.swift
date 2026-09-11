@@ -5,6 +5,9 @@ struct ConflictResolutionSheet: View {
     @EnvironmentObject private var model: RepositoryModel
     @Environment(\.dismiss) private var dismiss
     let request: ConflictRequest
+    let initialSize: CGSize
+    @State private var parentSize: CGSize?
+    private var panelSize: CGSize { parentSize ?? initialSize }
     @StateObject private var editing = ConflictEditingSession()
     @State private var activeRequest: ConflictRequest?
     @State private var document: ConflictDocument?
@@ -47,8 +50,10 @@ struct ConflictResolutionSheet: View {
             } else { Spacer(); Button("关闭") { dismiss() } }
         }
         .padding(16)
-        .frame(minWidth: 1180, idealWidth: 1360, maxWidth: .infinity, minHeight: 560, idealHeight: 820, maxHeight: .infinity)
-        .background(ConflictWindowConfigurator().frame(width: 0, height: 0))
+        .frame(width: panelSize.width, height: panelSize.height)
+        .background(ConflictWindowConfigurator(initialSize: initialSize) { size in
+            if parentSize != size { parentSize = size }
+        }.frame(width: 0, height: 0))
         .disabled(saving)
         .interactiveDismissDisabled()
         .task { await load(currentRequest) }
@@ -200,8 +205,7 @@ struct ConflictResolutionSheet: View {
             Spacer()
             Button("取消") { if editing.text != original { confirmClose = true } else { dismiss() } }.keyboardShortcut(.cancelAction)
             if document.canEdit {
-                if hasNext { Button("保存并暂存") { save(.edited(editing.text), next: false) }.disabled(!ready) }
-                Button(hasNext ? "保存并处理下一个" : "保存并暂存") { save(.edited(editing.text), next: true) }
+                Button(hasNext ? "保存并处理下一个" : "完成") { save(.edited(editing.text), next: true) }
                     .buttonStyle(.borderedProminent).disabled(!ready)
             }
         }

@@ -3,7 +3,7 @@ import SwiftUI
 
 private let sourceRowHeight: CGFloat = 23
 private let sourceTopInset: CGFloat = 10
-private let gutterWidth: CGFloat = 116
+private let gutterWidth: CGFloat = 144
 private let sourceChangeOverviewWidth: CGFloat = 4
 
 private func sourceChangeColor(_ kind: SourceLine.Kind) -> NSColor {
@@ -42,10 +42,12 @@ struct SourceCodeScrollView: NSViewRepresentable {
     let targetLine: Int?
     let navigationID: UUID
     var moveFile: ((Int) -> Void)? = nil
+    var rollbackChange: ((SourceChange) -> Void)? = nil
 
     func makeNSView(context: Context) -> SourceScrollContainer { SourceScrollContainer() }
     func updateNSView(_ view: SourceScrollContainer, context: Context) {
         view.moveFile = moveFile
+        view.rollbackChange = rollbackChange
         view.update(preview: preview, targetLine: targetLine, navigationID: navigationID)
     }
 }
@@ -56,6 +58,9 @@ final class SourceScrollContainer: NSView {
     private let gutter = SourceGutterView()
     private let changeOverview = SourceChangeOverviewView()
     var moveFile: ((Int) -> Void)? { didSet { code.moveFile = moveFile } }
+    var rollbackChange: ((SourceChange) -> Void)?
+    private var changes: [SourceChange] = []
+    private var rollbackButtons: [Int: NSButton] = [:]
     private var displayedLines: [SourceLine] = []
     private var previewID: UUID?
     private var navigationID: UUID?
@@ -96,6 +101,7 @@ final class SourceScrollContainer: NSView {
     deinit { NotificationCenter.default.removeObserver(self) }
 
     func update(preview: SourcePreview, targetLine: Int?, navigationID: UUID) {
+        changes = preview.rollback == nil ? [] : preview.changes
         if previewID != preview.id || displayedLines != preview.lines {
             let changedFile = previewID != preview.id
             displayedLines = preview.lines
@@ -159,9 +165,37 @@ final class SourceScrollContainer: NSView {
         }
         gutter.needsDisplay = true
         changeOverview.needsDisplay = true
+        updateRollbackButtons()
     }
 
-    @objc private func didScroll() { gutter.needsDisplay = true }
+    private func updateRollbackButtons() {
+        let offset = scrollView.contentView.bounds.minY
+        let visible = rollbackChange == nil ? [] : changes.filter {
+            let y = sourceTopInset + CGFloat($0.id) * sourceRowHeight - offset
+            return y + sourceRowHeight >= 0 && y < bounds.height
+        }
+        let ids = Set(visible.map(\.id))
+        for id in Array(rollbackButtons.keys) where !ids.contains(id) {
+            rollbackButtons.removeValue(forKey: id)?.removeFromSuperview()
+        }
+        for change in visible {
+            let button: NSButton
+            if let existing = rollbackButtons[change.id] { button = existing }
+            else {
+                button = NSButton(image: NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "回滚此处改动")!,
+                                  target: self, action: #selector(rollback(_:)))
+                button.tag = change.id; button.isBordered = false; button.controlSize = .small
+                button.toolTip = "回滚此处改动到 HEAD，保留其他改动"
+                button.setAccessibilityLabel("回滚第 \(change.id + 1) 行附近的改动")
+                rollbackButtons[change.id] = button; addSubview(button)
+            }
+            button.frame = NSRect(x: 118, y: sourceTopInset + CGFloat(change.id) * sourceRowHeight - offset, width: 22, height: sourceRowHeight)
+        }
+    }
+    @objc private func rollback(_ sender: NSButton) {
+        if let change = changes.first(where: { $0.id == sender.tag }) { rollbackChange?(change) }
+    }
+    @objc private func didScroll() { gutter.needsDisplay = true; updateRollbackButtons() }
 }
 
 private final class SourceTextView: NSTextView {

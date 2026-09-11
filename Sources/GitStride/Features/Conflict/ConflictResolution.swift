@@ -158,27 +158,69 @@ final class ConflictLineNumberGutter: NSView {
 }
 
 struct ConflictWindowConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> ConflictWindowView { ConflictWindowView() }
-    func updateNSView(_ view: ConflictWindowView, context: Context) { view.configureWindow() }
+    let initialSize: CGSize
+    let onParentSize: (CGSize) -> Void
+
+    func makeNSView(context: Context) -> ConflictWindowView {
+        let view = ConflictWindowView()
+        view.initialSize = initialSize
+        view.onParentSize = onParentSize
+        return view
+    }
+    func updateNSView(_ view: ConflictWindowView, context: Context) {
+        view.initialSize = initialSize
+        view.onParentSize = onParentSize
+        view.scheduleConfiguration()
+    }
 
     final class ConflictWindowView: NSView {
-        private weak var configuredWindow: NSWindow?
+        var initialSize = CGSize(width: 1200, height: 790)
+        var onParentSize: ((CGSize) -> Void)?
+        private var scheduled = false
+        private var publishedSize: CGSize?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            for name in [NSWindow.willBeginSheetNotification, NSWindow.didResizeNotification, NSWindow.didBecomeKeyNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(windowChanged(_:)), name: name, object: nil)
+            }
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        deinit { NotificationCenter.default.removeObserver(self) }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            configureWindow()
-            DispatchQueue.main.async { [weak self] in self?.configureWindow() }
+            publishedSize = nil
+            scheduleConfiguration()
         }
-
-        func configureWindow() {
+        @objc private func windowChanged(_ notification: Notification) {
+            guard let changed = notification.object as? NSWindow, let window,
+                  changed === window || changed === window.sheetParent || changed === window.parent else { return }
+            scheduleConfiguration()
+        }
+        func scheduleConfiguration() {
+            guard !scheduled, window != nil else { return }
+            scheduled = true
+            // Wait for sheet attachment and the current SwiftUI layout pass.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.scheduled = false
+                self.configureWindow()
+            }
+        }
+        private func configureWindow() {
             guard let window else { return }
-            window.styleMask.insert(.resizable)
-            window.minSize = NSSize(width: 1180, height: 560)
-            guard configuredWindow !== window else { return }
-            configuredWindow = window
-            let available = window.screen?.visibleFrame.size ?? NSSize(width: 1420, height: 880)
-            window.setContentSize(NSSize(width: 1360,
-                                         height: max(560, min(820, available.height - 80))))
+            let parent = window.sheetParent ?? window.parent
+            let size = parent?.contentLayoutRect.size ?? initialSize
+            guard size.width > 0, size.height > 0 else { return }
+            if publishedSize != size {
+                publishedSize = size
+                onParentSize?(size)
+            }
+            let current = window.contentView?.bounds.size ?? .zero
+            if abs(current.width - size.width) > 1 || abs(current.height - size.height) > 1 {
+                window.setContentSize(size)
+            }
         }
     }
 }

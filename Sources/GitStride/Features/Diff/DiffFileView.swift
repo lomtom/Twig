@@ -4,6 +4,7 @@ struct SourceFileView: View {
     let preview: SourcePreview
     let file: ChangedFile
     var moveFile: ((Int) -> Void)? = nil
+    var rollbackChange: ((SourceChange) -> Void)? = nil
     @State private var changeIndex = 0
     @State private var targetLine: Int?
     @State private var navigationID = UUID()
@@ -30,6 +31,12 @@ struct SourceFileView: View {
                 Spacer(minLength: 8)
                 StatusBadge(text: "+\(preview.additions)", color: green)
                 StatusBadge(text: "−\(preview.deletions)", color: .red)
+                if let rollbackChange, preview.rollback != nil {
+                    Button {
+                        if changes.indices.contains(changeIndex), let change = preview.changes.first(where: { $0.id == changes[changeIndex] }) { rollbackChange(change) }
+                    } label: { Image(systemName: "arrow.uturn.backward") }
+                        .help("回滚当前这处改动到 HEAD").disabled(changes.isEmpty)
+                }
                 HStack(spacing: 2) {
                     Button { navigate(-1) } label: { Image(systemName: "chevron.up").frame(width: 22, height: 22) }
                         .help("上一处改动").disabled(changes.isEmpty || changeIndex == 0)
@@ -45,7 +52,7 @@ struct SourceFileView: View {
             if preview.lines.isEmpty {
                 ContentUnavailableView("没有可显示的源代码", systemImage: "doc.text").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                SourceCodeScrollView(preview: preview, targetLine: targetLine, navigationID: navigationID, moveFile: moveFile)
+                SourceCodeScrollView(preview: preview, targetLine: targetLine, navigationID: navigationID, moveFile: moveFile, rollbackChange: rollbackChange)
             }
         }.onAppear { resetNavigation() }
             .onChange(of: preview.id) { _, _ in resetNavigation() }
