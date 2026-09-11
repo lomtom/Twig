@@ -1,0 +1,36 @@
+name: Package macOS release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build Twig.app
+    runs-on: macos-14
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Build app bundle
+        run: ./scripts/build-app.sh
+
+      - name: Archive app bundle
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="Twig-${{ github.event.release.tag_name }}-$(uname -m).zip"
+          ditto -c -k --sequesterRsrc --keepParent dist/Twig.app "$archive"
+          echo "path=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Attach archive to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.archive.outputs.path }}" --clobber
