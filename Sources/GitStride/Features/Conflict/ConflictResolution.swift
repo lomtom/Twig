@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ConflictRequest: Identifiable {
@@ -22,6 +23,8 @@ struct ConflictDocument {
     let stages: [ConflictStage]
     let worktree: Data?
     let symbolicLink: String?
+    var oursLabel: String = "当前版本"
+    var theirsLabel: String = "传入版本"
     var ours: ConflictStage? { stages.first { $0.number == 2 } }
     var theirs: ConflictStage? { stages.first { $0.number == 3 } }
     var base: ConflictStage? { stages.first { $0.number == 1 } }
@@ -37,7 +40,7 @@ struct ConflictDocument {
 }
 
 enum ConflictResolution {
-    case edited(String), ours, theirs, workingTree
+    case edited(String), ours, theirs
 }
 
 /// Keeps line endings and non-conflicting edits intact, including diff3 markers.
@@ -83,7 +86,8 @@ struct MergeChunk: Identifiable {
     }
     static func containsMarkers(_ text: String) -> Bool {
         text.split(separator: "\n").contains { line in
-            line.hasPrefix("<<<<<<<") || line.hasPrefix(">>>>>>>") || line.hasPrefix("|||||||") || line == "======="
+            line.hasPrefix("<<<<<<<") || line.hasPrefix(">>>>>>>") || line.hasPrefix("|||||||") ||
+            (line.trimmingCharacters(in: .newlines).count >= 7 && line.trimmingCharacters(in: .newlines).allSatisfy { $0 == "=" })
         }
     }
 }
@@ -111,135 +115,70 @@ struct ConflictOperationBanner: View {
     }
 }
 
-struct ConflictResolutionSheet: View {
-    @EnvironmentObject private var model: RepositoryModel
-    @Environment(\.dismiss) private var dismiss
-    let request: ConflictRequest
-    @State private var document: ConflictDocument?
-    @State private var result = ""
-    @State private var original = ""
-    @State private var loading = true
-    @State private var saving = false
-    @State private var error: String?
-    @State private var showBase = false
-    @State private var confirmClose = false
-    @State private var pendingResolution: ConflictResolution?
-    @State private var showResolutionConfirmation = false
-    private var chunks: [MergeChunk] { MergeChunk.parse(result) }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Resolve Conflicts", systemImage: "arrow.triangle.merge").font(.title2.weight(.semibold))
-                Text(request.file.path).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                Spacer()
-                Toggle("Show Common Ancestor", isOn: $showBase).toggleStyle(.button).disabled(document == nil)
+final class ConflictLineNumberGutter: NSView {
+    weak var scrollView: NSScrollView?
+    var lineCount = 1
+    var selectedLine: Int?
+    var selectionColor = NSColor.systemBlue
+    var changedLines = Set<Int>()
+    var changeColor = NSColor.systemPurple
+    override var isFlipped: Bool { true }
+    override func scrollWheel(with event: NSEvent) { scrollView?.scrollWheel(with: event) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.clear.setFill()
+        bounds.fill()
+        guard let scrollView else { return }
+        let lineHeight: CGFloat = 20
+        let offset = scrollView.contentView.bounds.minY
+        let first = max(0, Int((offset - 36) / lineHeight))
+        let last = min(lineCount, Int((offset + bounds.height - 36) / lineHeight) + 1)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .right
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraph
+        ]
+        guard first < last else { return }
+        for index in first..<last {
+            if selectedLine == index {
+                selectionColor.withAlphaComponent(0.3).setFill()
+                NSRect(x: 0, y: 36 + CGFloat(index) * lineHeight - offset, width: bounds.width, height: lineHeight).fill()
             }
-            if request.expected.operation == "变基" {
-                Text("变基时，当前版本是目标分支及已重放的提交；传入版本是正在重放的提交。").font(.caption).foregroundStyle(.secondary)
+            if changedLines.contains(index) {
+                changeColor.withAlphaComponent(0.45).setFill()
+                NSRect(x: 0, y: 36 + CGFloat(index) * lineHeight - offset, width: 3, height: lineHeight).fill()
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-            if loading { ProgressView("正在读取冲突版本…").frame(maxWidth: .infinity, maxHeight: .infinity) }
-            else if let document {
-                if showBase {
-                    side("共同祖先", stage: document.base).frame(height: 130)
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    side("当前版本 · Ours", stage: document.ours)
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("合并结果").fontWeight(.medium)
-                            Spacer()
-                            Text("\(chunks.count) 处冲突").foregroundStyle(.secondary)
-                        }.font(.caption)
-                        if document.canEdit {
-                            TextEditor(text: $result).font(.system(size: 12, design: .monospaced))
-                                .scrollContentBackground(.hidden).padding(6)
-                                .background(GitStrideStyle.input, in: RoundedRectangle(cornerRadius: 8))
-                                .accessibilityLabel("合并结果")
-                        } else {
-                            Text("二进制、大文件、符号链接或子模块无法在此编辑文本。可选择完整一侧，或在外部编辑后标记为已解决。")
-                                .font(.callout).foregroundStyle(.secondary).padding()
-                            Spacer()
-                        }
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    side("传入版本 · Theirs", stage: document.theirs)
-                }.frame(maxHeight: .infinity)
-                if document.canEdit && !chunks.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 12) {
-                            ForEach(chunks) { chunk in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("冲突 \(chunk.id + 1)").font(.caption).foregroundStyle(.secondary)
-                                    HStack {
-                                        Button("Use Current") { replace(chunk, with: chunk.ours) }
-                                        Button("Use Incoming") { replace(chunk, with: chunk.theirs) }
-                                        Button("Use Both") { replace(chunk, with: chunk.ours + chunk.theirs) }
-                                    }.controlSize(.small)
-                                }.padding(9).background(GitStrideStyle.subtleFill, in: RoundedRectangle(cornerRadius: 8))
-                            }
-                        }
-                    }.frame(height: 72)
-                }
-                HStack {
-                    Button(document.ours == nil ? "采用当前侧删除" : "采用整个当前版本") { confirm(.ours) }.disabled(!document.canSelectSide)
-                    Button(document.theirs == nil ? "采用传入侧删除" : "采用整个传入版本") { confirm(.theirs) }.disabled(!document.canSelectSide)
-                    if !document.canEdit {
-                        Button("Mark Working Tree File Resolved") { confirm(.workingTree) }
-                    }
-                    Spacer()
-                    Button("取消") { close() }.keyboardShortcut(.cancelAction)
-                    if document.canEdit {
-                        Button("Save and Mark Resolved") { save(.edited(result)) }.buttonStyle(.borderedProminent)
-                            .disabled(MergeChunk.containsMarkers(result))
-                    }
-                }
-            } else {
-                Spacer()
-                HStack { Spacer(); Button("关闭") { dismiss() } }
-            }
-        }.padding(22).frame(width: 1020, height: 700).disabled(saving)
-            .interactiveDismissDisabled()
-            .task { await load() }
-            .alert("放弃本次编辑？", isPresented: $confirmClose) {
-                Button("继续编辑", role: .cancel) { }
-                Button("放弃编辑", role: .destructive) { dismiss() }
-            } message: { Text("尚未保存的合并结果会丢失，工作区文件保持不变。") }
-            .alert("确认解决此文件？", isPresented: $showResolutionConfirmation) {
-                Button("取消", role: .cancel) { pendingResolution = nil }
-                Button("确认") { if let pendingResolution { save(pendingResolution) } }
-            } message: { Text("所选完整版本将替换工作区文件并暂存；若该侧不存在文件，将采用删除。选择工作区版本时会直接暂存当前文件。") }
+            ("\(index + 1)" as NSString).draw(in: NSRect(x: 4, y: 36 + CGFloat(index) * lineHeight - offset + 3, width: bounds.width - 8, height: lineHeight), withAttributes: attributes)
+        }
+        NSColor.separatorColor.setFill()
+        NSRect(x: bounds.width - 1, y: 0, width: 1, height: bounds.height).fill()
     }
-    private func side(_ title: String, stage: ConflictStage?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption.weight(.medium))
-            ScrollView([.horizontal, .vertical]) {
-                Text(stage == nil ? "此侧不存在文件（删除）" : (stage?.text ?? "二进制、非 UTF-8 或超过 2 MB"))
-                    .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true).padding(8)
-            }.defaultScrollAnchor(.topLeading)
-                .background(GitStrideStyle.input, in: RoundedRectangle(cornerRadius: 8))
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    private func replace(_ chunk: MergeChunk, with value: String) { result.replaceSubrange(chunk.range, with: value) }
-    private func confirm(_ resolution: ConflictResolution) { pendingResolution = resolution; showResolutionConfirmation = true }
-    private func close() { if result != original { confirmClose = true } else { dismiss() } }
-    @MainActor private func load() async {
-        do {
-            let value = try await model.git.conflictDocument(request)
-            guard !Task.isCancelled else { return }
-            document = value; result = value.initialText; original = result
-        } catch { self.error = error.localizedDescription }
-        loading = false
-    }
-    private func save(_ resolution: ConflictResolution) {
-        guard let document else { return }
-        saving = true; error = nil
-        Task {
-            do {
-                try await model.resolveConflict(document, resolution: resolution)
-                dismiss()
-            } catch { self.error = error.localizedDescription }
-            saving = false
+}
+
+struct ConflictWindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> ConflictWindowView { ConflictWindowView() }
+    func updateNSView(_ view: ConflictWindowView, context: Context) { view.configureWindow() }
+
+    final class ConflictWindowView: NSView {
+        private weak var configuredWindow: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            configureWindow()
+            DispatchQueue.main.async { [weak self] in self?.configureWindow() }
+        }
+
+        func configureWindow() {
+            guard let window else { return }
+            window.styleMask.insert(.resizable)
+            window.minSize = NSSize(width: 1180, height: 560)
+            guard configuredWindow !== window else { return }
+            configuredWindow = window
+            let available = window.screen?.visibleFrame.size ?? NSSize(width: 1420, height: 880)
+            window.setContentSize(NSSize(width: 1360,
+                                         height: max(560, min(820, available.height - 80))))
         }
     }
 }

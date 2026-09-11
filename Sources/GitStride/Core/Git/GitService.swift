@@ -236,7 +236,28 @@ actor GitService {
         if link != nil || values?.isDirectory == true { data = nil }
         else if FileManager.default.fileExists(atPath: fileURL.path) { data = try Data(contentsOf: fileURL, options: .mappedIfSafe) }
         else { data = nil }
-        return ConflictDocument(request: request, stages: stages, worktree: data, symbolicLink: link)
+        func revisionLabel(_ ref: String, fallback: String) -> String? {
+            guard let revision = try? run(["rev-parse", "--verify", ref + "^{commit}"], at: root, allowFailure: true),
+                  revision.code == 0 else { return nil }
+            let oid = revision.text.trimmingCharacters(in: .newlines)
+            let names = (try? run(["for-each-ref", "--points-at", oid, "--format=%(refname:short)", "refs/heads", "refs/remotes"], at: root).text)?
+                .split(separator: "\n").prefix(2).joined(separator: ", ") ?? ""
+            return "\(names.isEmpty ? fallback : names) · \(oid.prefix(8))"
+        }
+        var document = ConflictDocument(request: request, stages: stages, worktree: data, symbolicLink: link)
+        document.oursLabel = revisionLabel("HEAD", fallback: request.expected.branch) ?? request.expected.branch
+        let incomingRef: String
+        switch request.expected.operation {
+        case "变基": incomingRef = "REBASE_HEAD"
+        case "挑选提交": incomingRef = "CHERRY_PICK_HEAD"
+        case "撤销提交": incomingRef = "REVERT_HEAD"
+        default: incomingRef = "MERGE_HEAD"
+        }
+        document.theirsLabel = revisionLabel(incomingRef, fallback: "传入提交") ?? "传入版本（来源引用不可用）"
+        if request.expected.operation == "撤销提交" {
+            document.theirsLabel = "撤销 \(document.theirsLabel) 的反向改动"
+        }
+        return document
     }
 
     func resolveConflict(_ document: ConflictDocument, resolution: ConflictResolution) throws {
@@ -247,10 +268,8 @@ actor GitService {
               current.operation == request.expected.operation else { throw GitFailure(message: "仓库状态已改变，请重新打开冲突文件。") }
         let latest = try conflictDocument(request)
         guard latest.stages == document.stages else { throw GitFailure(message: "冲突版本已改变，请重新打开文件。") }
-        if case .workingTree = resolution { } else {
-            guard latest.worktree == document.worktree, latest.symbolicLink == document.symbolicLink else {
-                throw GitFailure(message: "工作区文件已被外部修改。请关闭后重新打开，避免覆盖新的改动。")
-            }
+        guard latest.worktree == document.worktree, latest.symbolicLink == document.symbolicLink else {
+            throw GitFailure(message: "工作区文件已被外部修改。请关闭后重新打开，避免覆盖新的改动。")
         }
         let path = request.file.path
         switch resolution {
@@ -262,7 +281,7 @@ actor GitService {
             try FileManager.default.setAttributes([.posixPermissions: mode == "100755" ? 0o755 : 0o644], ofItemAtPath: url.path)
             try run(["add", "--", path], at: root)
         case .ours, .theirs:
-            guard latest.canSelectSide else { throw GitFailure(message: "此类型请在外部解决后标记完成。") }
+            guard latest.canSelectSide else { throw GitFailure(message: "此文件类型不支持在此面板中选择完整版本。") }
             let ours: Bool
             if case .ours = resolution { ours = true } else { ours = false }
             if (ours ? latest.ours : latest.theirs) == nil {
@@ -271,11 +290,7 @@ actor GitService {
                 try run(["checkout", ours ? "--ours" : "--theirs", "--", path], at: root)
                 try run(["add", "--", path], at: root)
             }
-        case .workingTree:
-            if let data = latest.worktree, !data.contains(0), let text = String(data: data, encoding: .utf8), MergeChunk.containsMarkers(text) {
-                throw GitFailure(message: "工作区文件仍包含冲突标记，请先解决。")
-            }
-            try run(["add", "--all", "--", path], at: root)
+
         }
     }
 
